@@ -1,0 +1,763 @@
+/Users/taircarmon/Desktop/growth_function_posture_aware/batch_analysis_pipeline.py:211: FutureWarning: `RegionProperties.major_axis_length` is deprecated starting in version 0.26 and will be removed in version 2.0. Use `RegionProperties.axis_major_length` instead. 
+  'major_axis': round(props.major_axis_length, 2),
+/Users/taircarmon/Desktop/growth_function_posture_aware/batch_analysis_pipeline.py:212: FutureWarning: `RegionProperties.minor_axis_length` is deprecated starting in version 0.26 and will be removed in version 2.0. Use `RegionProperties.axis_minor_length` instead. 
+  'minor_axis': round(props.minor_axis_length, 2),
+/Users/taircarmon/Desktop/growth_function_posture_aware/batch_analysis_pipeline.py:217: FutureWarning: `RegionProperties.mean_intensity` is deprecated starting in version 0.26 and will be removed in version 2.0. Use `RegionProperties.intensity_mean` instead. 
+  'mean_intensity': round(props.mean_intensity, 2),
+/Users/taircarmon/Desktop/growth_function_posture_aware/batch_analysis_pipeline.py:219: FutureWarning: `RegionProperties.mean_intensity` is deprecated starting in version 0.26 and will be removed in version 2.0. Use `RegionProperties.intensity_mean` instead. 
+  'mean_blackhat': round(bh_props.mean_intensity, 2),
+======================================================================
+AUTOMATED LARVA ANALYSIS PIPELINE
+======================================================================
+Root Directory: /Users/taircarmon/Desktop/growth_function_posture_aware
+Output Directory: /Users/taircarmon/Desktop/growth_function_posture_aware/analysis_full
+Start Time: 2026-02-28 12:00:05
+======================================================================
+
+Found 11 date folders:
+  - 18.10
+  - 19.10
+  - 20.10
+  - 21.10
+  - 24.10
+  - 25.10
+  - 26.10
+  - 27.10
+  - 29.10
+  - 3.11
+  - 31.10
+
+======================================================================
+Processing folder: 18.10
+======================================================================
+
+  Processing 30 images in 18.10
+    Processing: IMG_2953.JPG
+    ✓ Detected 10 larvae
+    Processing: IMG_2954.JPG
+    ✓ Detected 4 larvae
+    Processing: IMG_2955.JPG
+    ✓ Detected 10 larvae
+    Processing: IMG_2956.JPG
+    ✓ Detected 8 larvae
+    Processing: IMG_2957.JPG
+    ✓ Detected 11 larvae
+    Processing: IMG_2958.JPG
+    ✓ Detected 6 larvae
+    Processing: IMG_2959.JPG
+    ✓ Detected 9 larvae
+    Processing: IMG_3001.JPG
+    ✓ Detected 13 larvae
+    Processing: IMG_3002.JPG
+    ✓ Detected 13 larvae
+    Processing: IMG_3003.JPG
+    ✓ Detected 15 larvae
+    Processing: IMG_3004.JPG
+    ✓ Detected 11 larvae
+    Processing: IMG_3005.JPG
+    ✓ Detected 8 larvae
+    Processing: IMG_3006.JPG
+    ✓ Detected 15 larvae
+    Processing: IMG_3007.JPG
+    ✓ Detected 13 larvae
+    Processing: IMG_3008.JPG
+    ✓ Detected 19 larvae
+    Processing: IMG_3009.JPG
+    ✓ Detected 25 larvae
+    Processing: IMG_3010.JPG
+    ✓ Detected 13 larvae
+    Processing: IMG_3011.JPG
+    ✓ Detected 16 larvae
+    Processing: IMG_3012.JPG
+    ✓ Detected 13 larvae
+    Processing: IMG_3013.JPG
+    ✓ Detected 19 larvae
+    Processing: IMG_3015.JPG
+    ✓ Detected 11 larvae
+    Processing: IMG_3016.JPG
+    ✓ Detected 14 larvae
+    Processing: IMG_3017.JPG
+    ✓ Detected 15 larvae
+    Processing: IMG_3018.JPG
+    ✓ Detected 13 larvae
+    Processing: IMG_3019.JPG
+    ✓ Detected 19 larvae
+    Processing: IMG_3020.JPG
+    ✓ Detected 10 larvae
+    Processing: IMG_3021.JPG
+    ✓ Detected 12 larvae
+    Processing: IMG_3022.JPG
+    ✓ Detected 16 larvae
+    Processing: IMG_3023.JPG
+    ✓ Detected 10 larvae
+    Processing: IMG_3024.JPG
+    ✓ Detected 17 larvae
+
+======================================================================
+Processing folder: 19.10
+======================================================================
+
+  Processing 30 images in 19.10
+    Processing: IMG_3778.JPG
+    ✓ Detected 22 larvae
+    Processing: IMG_3779.JPG
+    ✓ Detected 23 larvae
+    Processing: IMG_3780.JPG
+    ✓ Detected 21 larvae
+    Processing: IMG_3788.JPG
+    ✓ Detected 26 larvae
+    Processing: IMG_3789.JPG
+    ✓ Detected 26 larvae
+    Processing: IMG_3793.JPG
+    ✓ Detected 26 larvae
+    Processing: IMG_3794.JPG
+    ✓ Detected 26 larvae
+    Processing: IMG_3800.JPG
+    ✓ Detected 30 larvae
+    Processing: IMG_3801.JPG
+    ✓ Detected 30 larvae
+    Processing: IMG_3802.JPG
+    ✓ Detected 30 larvae
+    Processing: IMG_3803.JPG
+    ✓ Detected 24 larvae
+    Processing: IMG_3804.JPG
+    ✓ Detected 27 larvae
+    Processing: IMG_3805.JPG
+    ✓ Detected 29 larvae
+    Processing: IMG_3806.JPG
+    ✓ Detected 25 larvae
+    Processing: IMG_3807.JPG
+    ✓ Detected 24 larvae
+    Processing: IMG_3808.JPG
+    ✓ Detected 23 larvae
+    Processing: IMG_3809.JPG
+    ✓ Detected 24 larvae
+    Processing: IMG_3810.JPG
+    ✓ Detected 25 larvae
+    Processing: IMG_3811.JPG
+    ✓ Detected 28 larvae
+    Processing: IMG_3812.JPG
+    ✓ Detected 22 larvae
+    Processing: IMG_3815.JPG
+    ✓ Detected 30 larvae
+    Processing: IMG_3816.JPG
+    ✓ Detected 23 larvae
+    Processing: IMG_3817.JPG
+    ✓ Detected 24 larvae
+    Processing: IMG_3818.JPG
+    ✓ Detected 24 larvae
+    Processing: IMG_3819.JPG
+    ✓ Detected 26 larvae
+    Processing: IMG_3820.JPG
+    ✓ Detected 24 larvae
+    Processing: IMG_3821.JPG
+    ✓ Detected 22 larvae
+    Processing: IMG_3822.JPG
+    ✓ Detected 22 larvae
+    Processing: IMG_3823.JPG
+    ✓ Detected 21 larvae
+    Processing: IMG_3824.JPG
+    ✓ Detected 22 larvae
+
+======================================================================
+Processing folder: 20.10
+======================================================================
+
+  Processing 30 images in 20.10
+    Processing: IMG_4646.JPG
+    ✓ Detected 16 larvae
+    Processing: IMG_4659.JPG
+    ✓ Detected 18 larvae
+    Processing: IMG_4660.JPG
+    ✓ Detected 20 larvae
+    Processing: IMG_4711.JPG
+    ✓ Detected 21 larvae
+    Processing: IMG_4715.JPG
+    ✓ Detected 19 larvae
+    Processing: IMG_4717.JPG
+    ✓ Detected 23 larvae
+    Processing: IMG_4718.JPG
+    ✓ Detected 19 larvae
+    Processing: IMG_4720.JPG
+    ✓ Detected 19 larvae
+    Processing: IMG_4721.JPG
+    ✓ Detected 19 larvae
+    Processing: IMG_4723.JPG
+    ✓ Detected 17 larvae
+    Processing: IMG_4724.JPG
+    ✓ Detected 20 larvae
+    Processing: IMG_4725.JPG
+    ✓ Detected 22 larvae
+    Processing: IMG_4726.JPG
+    ✓ Detected 24 larvae
+    Processing: IMG_4727.JPG
+    ✓ Detected 23 larvae
+    Processing: IMG_4728.JPG
+    ✓ Detected 23 larvae
+    Processing: IMG_4729.JPG
+    ✓ Detected 23 larvae
+    Processing: IMG_4730.JPG
+    ✓ Detected 26 larvae
+    Processing: IMG_4731.JPG
+    ✓ Detected 26 larvae
+    Processing: IMG_4732.JPG
+    ✓ Detected 23 larvae
+    Processing: IMG_4733.JPG
+    ✓ Detected 27 larvae
+    Processing: IMG_4740.JPG
+    ✓ Detected 25 larvae
+    Processing: IMG_4741.JPG
+    ✓ Detected 23 larvae
+    Processing: IMG_4742.JPG
+    ✓ Detected 19 larvae
+    Processing: IMG_4743.JPG
+    ✓ Detected 17 larvae
+    Processing: IMG_4744.JPG
+    ✓ Detected 19 larvae
+    Processing: IMG_4745.JPG
+    ✓ Detected 16 larvae
+    Processing: IMG_4746.JPG
+    ✓ Detected 14 larvae
+    Processing: IMG_4747.JPG
+    ✓ Detected 14 larvae
+    Processing: IMG_4748.JPG
+    ✓ Detected 19 larvae
+    Processing: IMG_4749.JPG
+    ✓ Detected 16 larvae
+
+======================================================================
+Processing folder: 21.10
+======================================================================
+
+  Processing 30 images in 21.10
+    Processing: IMG_5245.JPG
+    ✓ Detected 14 larvae
+    Processing: IMG_5246.JPG
+    ✓ Detected 13 larvae
+    Processing: IMG_5247.JPG
+    ✓ Detected 13 larvae
+    Processing: IMG_5248.JPG
+    ✓ Detected 12 larvae
+    Processing: IMG_5250.JPG
+    ✓ Detected 17 larvae
+    Processing: IMG_5251.JPG
+    ✓ Detected 16 larvae
+    Processing: IMG_5254.JPG
+    ✓ Detected 15 larvae
+    Processing: IMG_5266.JPG
+    ✓ Detected 10 larvae
+    Processing: IMG_5267.JPG
+    ✓ Detected 15 larvae
+    Processing: IMG_5268.JPG
+    ✓ Detected 13 larvae
+    Processing: IMG_5269.JPG
+    ✓ Detected 14 larvae
+    Processing: IMG_5270.JPG
+    ✓ Detected 16 larvae
+    Processing: IMG_5271.JPG
+    ✓ Detected 14 larvae
+    Processing: IMG_5272.JPG
+    ✓ Detected 16 larvae
+    Processing: IMG_5273.JPG
+    ✓ Detected 13 larvae
+    Processing: IMG_5274.JPG
+    ✓ Detected 16 larvae
+    Processing: IMG_5275.JPG
+    ✓ Detected 17 larvae
+    Processing: IMG_5276.JPG
+    ✓ Detected 17 larvae
+    Processing: IMG_5277.JPG
+    ✓ Detected 16 larvae
+    Processing: IMG_5278.JPG
+    ✓ Detected 17 larvae
+    Processing: IMG_5279.JPG
+    ✓ Detected 18 larvae
+    Processing: IMG_5280.JPG
+    ✓ Detected 21 larvae
+    Processing: IMG_5281.JPG
+    ✓ Detected 19 larvae
+    Processing: IMG_5282.JPG
+    ✓ Detected 23 larvae
+    Processing: IMG_5283.JPG
+    ✓ Detected 20 larvae
+    Processing: IMG_5284.JPG
+    ✓ Detected 18 larvae
+    Processing: IMG_5285.JPG
+    ✓ Detected 24 larvae
+    Processing: IMG_5305.JPG
+    ✓ Detected 18 larvae
+    Processing: IMG_5312.JPG
+    ✓ Detected 4 larvae
+    Processing: IMG_5341.JPG
+    ✓ Detected 7 larvae
+
+======================================================================
+Processing folder: 24.10
+======================================================================
+
+  Processing 30 images in 24.10
+    Processing: IMG_5500.JPG
+    ✓ Detected 43 larvae
+    Processing: IMG_5501.JPG
+    ✓ Detected 40 larvae
+    Processing: IMG_5502.JPG
+    ✓ Detected 41 larvae
+    Processing: IMG_5503.JPG
+    ✓ Detected 38 larvae
+    Processing: IMG_5504.JPG
+    ✓ Detected 40 larvae
+    Processing: IMG_5505.JPG
+    ✓ Detected 47 larvae
+    Processing: IMG_5506.JPG
+    ✓ Detected 39 larvae
+    Processing: IMG_5507.JPG
+    ✓ Detected 50 larvae
+    Processing: IMG_5508.JPG
+    ✓ Detected 43 larvae
+    Processing: IMG_5509.JPG
+    ✓ Detected 39 larvae
+    Processing: IMG_5510.JPG
+    ✓ Detected 43 larvae
+    Processing: IMG_5511.JPG
+    ✓ Detected 45 larvae
+    Processing: IMG_5512.JPG
+    ✓ Detected 49 larvae
+    Processing: IMG_5513.JPG
+    ✓ Detected 41 larvae
+    Processing: IMG_5514.JPG
+    ✓ Detected 41 larvae
+    Processing: IMG_5515.JPG
+    ✓ Detected 48 larvae
+    Processing: IMG_5516.JPG
+    ✓ Detected 43 larvae
+    Processing: IMG_5517.JPG
+    ✓ Detected 41 larvae
+    Processing: IMG_5518.JPG
+    ✓ Detected 41 larvae
+    Processing: IMG_5519.JPG
+    ✓ Detected 47 larvae
+    Processing: IMG_5520.JPG
+    ✓ Detected 46 larvae
+    Processing: IMG_5521.JPG
+    ✓ Detected 46 larvae
+    Processing: IMG_5522.JPG
+    ✓ Detected 53 larvae
+    Processing: IMG_5523.JPG
+    ✓ Detected 48 larvae
+    Processing: IMG_5524.JPG
+    ✓ Detected 47 larvae
+    Processing: IMG_5525.JPG
+    ✓ Detected 49 larvae
+    Processing: IMG_5526.JPG
+    ✓ Detected 47 larvae
+    Processing: IMG_5527.JPG
+    ✓ Detected 50 larvae
+    Processing: IMG_5528.JPG
+    ✓ Detected 46 larvae
+    Processing: IMG_5529.JPG
+    ✓ Detected 49 larvae
+
+======================================================================
+Processing folder: 25.10
+======================================================================
+
+  Processing 30 images in 25.10
+    Processing: IMG_5747.JPG
+    ✓ Detected 29 larvae
+    Processing: IMG_5748.JPG
+    ✓ Detected 30 larvae
+    Processing: IMG_5749.JPG
+    ✓ Detected 28 larvae
+    Processing: IMG_5750.JPG
+    ✓ Detected 26 larvae
+    Processing: IMG_5751.JPG
+    ✓ Detected 32 larvae
+    Processing: IMG_5752.JPG
+    ✓ Detected 30 larvae
+    Processing: IMG_5753.JPG
+    ✓ Detected 26 larvae
+    Processing: IMG_5754.JPG
+    ✓ Detected 22 larvae
+    Processing: IMG_5755.JPG
+    ✓ Detected 20 larvae
+    Processing: IMG_5756.JPG
+    ✓ Detected 24 larvae
+    Processing: IMG_5757.JPG
+    ✓ Detected 24 larvae
+    Processing: IMG_5758.JPG
+    ✓ Detected 26 larvae
+    Processing: IMG_5759.JPG
+    ✓ Detected 25 larvae
+    Processing: IMG_5760.JPG
+    ✓ Detected 26 larvae
+    Processing: IMG_5761.JPG
+    ✓ Detected 22 larvae
+    Processing: IMG_5762.JPG
+    ✓ Detected 26 larvae
+    Processing: IMG_5763.JPG
+    ✓ Detected 29 larvae
+    Processing: IMG_5764.JPG
+    ✓ Detected 21 larvae
+    Processing: IMG_5765.JPG
+    ✓ Detected 21 larvae
+    Processing: IMG_5766.JPG
+    ✓ Detected 29 larvae
+    Processing: IMG_5767.JPG
+    ✓ Detected 29 larvae
+    Processing: IMG_5769.JPG
+    ✓ Detected 23 larvae
+    Processing: IMG_5770.JPG
+    ✓ Detected 25 larvae
+    Processing: IMG_5771.JPG
+    ✓ Detected 24 larvae
+    Processing: IMG_5772.JPG
+    ✓ Detected 25 larvae
+    Processing: IMG_5773.JPG
+    ✓ Detected 22 larvae
+    Processing: IMG_5774.JPG
+    ✓ Detected 27 larvae
+    Processing: IMG_5775.JPG
+    ✓ Detected 25 larvae
+    Processing: IMG_5776.JPG
+    ✓ Detected 27 larvae
+    Processing: IMG_5777.JPG
+    ✓ Detected 22 larvae
+
+======================================================================
+Processing folder: 26.10
+======================================================================
+
+  Processing 30 images in 26.10
+    Processing: IMG_6113.JPG
+    ✓ Detected 20 larvae
+    Processing: IMG_6114.JPG
+    ✓ Detected 25 larvae
+    Processing: IMG_6115.JPG
+    ✓ Detected 23 larvae
+    Processing: IMG_6116.JPG
+    ✓ Detected 18 larvae
+    Processing: IMG_6117.JPG
+    ✓ Detected 23 larvae
+    Processing: IMG_6118.JPG
+    ✓ Detected 24 larvae
+    Processing: IMG_6119.JPG
+    ✓ Detected 28 larvae
+    Processing: IMG_6120.JPG
+    ✓ Detected 22 larvae
+    Processing: IMG_6121.JPG
+    ✓ Detected 23 larvae
+    Processing: IMG_6122.JPG
+    ✓ Detected 25 larvae
+    Processing: IMG_6123.JPG
+    ✓ Detected 25 larvae
+    Processing: IMG_6124.JPG
+    ✓ Detected 26 larvae
+    Processing: IMG_6125.JPG
+    ✓ Detected 23 larvae
+    Processing: IMG_6126.JPG
+    ✓ Detected 22 larvae
+    Processing: IMG_6127.JPG
+    ✓ Detected 19 larvae
+    Processing: IMG_6128.JPG
+    ✓ Detected 21 larvae
+    Processing: IMG_6129.JPG
+    ✓ Detected 21 larvae
+    Processing: IMG_6130.JPG
+    ✓ Detected 22 larvae
+    Processing: IMG_6131.JPG
+    ✓ Detected 19 larvae
+    Processing: IMG_6132.JPG
+    ✓ Detected 20 larvae
+    Processing: IMG_6133.JPG
+    ✓ Detected 27 larvae
+    Processing: IMG_6134.JPG
+    ✓ Detected 23 larvae
+    Processing: IMG_6135.JPG
+    ✓ Detected 27 larvae
+    Processing: IMG_6136.JPG
+    ✓ Detected 20 larvae
+    Processing: IMG_6137.JPG
+    ✓ Detected 25 larvae
+    Processing: IMG_6138.JPG
+    ✓ Detected 23 larvae
+    Processing: IMG_6139.JPG
+    ✓ Detected 22 larvae
+    Processing: IMG_6140.JPG
+    ✓ Detected 24 larvae
+    Processing: IMG_6141.JPG
+    ✓ Detected 25 larvae
+    Processing: IMG_6142.JPG
+    ✓ Detected 24 larvae
+
+======================================================================
+Processing folder: 27.10
+======================================================================
+
+  Processing 30 images in 27.10
+    Processing: IMG_6600.JPG
+    ✓ Detected 37 larvae
+    Processing: IMG_6601.JPG
+    ✓ Detected 32 larvae
+    Processing: IMG_6602.JPG
+    ✓ Detected 33 larvae
+    Processing: IMG_6603.JPG
+    ✓ Detected 30 larvae
+    Processing: IMG_6604.JPG
+    ✓ Detected 38 larvae
+    Processing: IMG_6605.JPG
+    ✓ Detected 30 larvae
+    Processing: IMG_6606.JPG
+    ✓ Detected 28 larvae
+    Processing: IMG_6607.JPG
+    ✓ Detected 29 larvae
+    Processing: IMG_6608.JPG
+    ✓ Detected 31 larvae
+    Processing: IMG_6609.JPG
+    ✓ Detected 32 larvae
+    Processing: IMG_6610.JPG
+    ✓ Detected 33 larvae
+    Processing: IMG_6611.JPG
+    ✓ Detected 32 larvae
+    Processing: IMG_6612.JPG
+    ✓ Detected 37 larvae
+    Processing: IMG_6613.JPG
+    ✓ Detected 37 larvae
+    Processing: IMG_6614.JPG
+    ✓ Detected 35 larvae
+    Processing: IMG_6615.JPG
+    ✓ Detected 31 larvae
+    Processing: IMG_6616.JPG
+    ✓ Detected 28 larvae
+    Processing: IMG_6617.JPG
+    ✓ Detected 30 larvae
+    Processing: IMG_6618.JPG
+    ✓ Detected 32 larvae
+    Processing: IMG_6619.JPG
+    ✓ Detected 29 larvae
+    Processing: IMG_6620.JPG
+    ✓ Detected 29 larvae
+    Processing: IMG_6621.JPG
+    ✓ Detected 32 larvae
+    Processing: IMG_6622.JPG
+    ✓ Detected 32 larvae
+    Processing: IMG_6623.JPG
+    ✓ Detected 33 larvae
+    Processing: IMG_6624.JPG
+    ✓ Detected 31 larvae
+    Processing: IMG_6625.JPG
+    ✓ Detected 34 larvae
+    Processing: IMG_6626.JPG
+    ✓ Detected 32 larvae
+    Processing: IMG_6627.JPG
+    ✓ Detected 32 larvae
+    Processing: IMG_6628.JPG
+    ✓ Detected 30 larvae
+    Processing: IMG_6629.JPG
+    ✓ Detected 32 larvae
+
+======================================================================
+Processing folder: 29.10
+======================================================================
+
+  Processing 30 images in 29.10
+    Processing: IMG_7105.JPG
+    ✓ Detected 50 larvae
+    Processing: IMG_7106.JPG
+    ✓ Detected 46 larvae
+    Processing: IMG_7107.JPG
+    ✓ Detected 45 larvae
+    Processing: IMG_7108.JPG
+    ✓ Detected 50 larvae
+    Processing: IMG_7109.JPG
+    ✓ Detected 51 larvae
+    Processing: IMG_7110.JPG
+    ✓ Detected 49 larvae
+    Processing: IMG_7111.JPG
+    ✓ Detected 46 larvae
+    Processing: IMG_7112.JPG
+    ✓ Detected 50 larvae
+    Processing: IMG_7113.JPG
+    ✓ Detected 52 larvae
+    Processing: IMG_7114.JPG
+    ✓ Detected 50 larvae
+    Processing: IMG_7115.JPG
+    ✓ Detected 50 larvae
+    Processing: IMG_7116.JPG
+    ✓ Detected 52 larvae
+    Processing: IMG_7117.JPG
+    ✓ Detected 45 larvae
+    Processing: IMG_7118.JPG
+    ✓ Detected 50 larvae
+    Processing: IMG_7119.JPG
+    ✓ Detected 51 larvae
+    Processing: IMG_7120.JPG
+    ✓ Detected 55 larvae
+    Processing: IMG_7121.JPG
+    ✓ Detected 48 larvae
+    Processing: IMG_7122.JPG
+    ✓ Detected 45 larvae
+    Processing: IMG_7123.JPG
+    ✓ Detected 52 larvae
+    Processing: IMG_7124.JPG
+    ✓ Detected 47 larvae
+    Processing: IMG_7125.JPG
+    ✓ Detected 52 larvae
+    Processing: IMG_7126.JPG
+    ✓ Detected 53 larvae
+    Processing: IMG_7127.JPG
+    ✓ Detected 54 larvae
+    Processing: IMG_7128.JPG
+    ✓ Detected 53 larvae
+    Processing: IMG_7129.JPG
+    ✓ Detected 52 larvae
+    Processing: IMG_7130.JPG
+    ✓ Detected 50 larvae
+    Processing: IMG_7131.JPG
+    ✓ Detected 41 larvae
+    Processing: IMG_7132.JPG
+    ✓ Detected 50 larvae
+    Processing: IMG_7133.JPG
+    ✓ Detected 51 larvae
+    Processing: IMG_7134.JPG
+    ✓ Detected 49 larvae
+
+======================================================================
+Processing folder: 3.11
+======================================================================
+
+  Processing 30 images in 3.11
+    Processing: IMG_7895.JPG
+    ✓ Detected 69 larvae
+    Processing: IMG_7896.JPG
+    ✓ Detected 67 larvae
+    Processing: IMG_7897.JPG
+    ✓ Detected 74 larvae
+    Processing: IMG_7898.JPG
+    ✓ Detected 67 larvae
+    Processing: IMG_7899.JPG
+    ✓ Detected 75 larvae
+    Processing: IMG_7900.JPG
+    ✓ Detected 67 larvae
+    Processing: IMG_7901.JPG
+    ✓ Detected 65 larvae
+    Processing: IMG_7902.JPG
+    ✓ Detected 67 larvae
+    Processing: IMG_7903.JPG
+    ✓ Detected 22 larvae
+    Processing: IMG_7904.JPG
+    ✓ Detected 65 larvae
+    Processing: IMG_7905.JPG
+    ✓ Detected 65 larvae
+    Processing: IMG_8051.JPG
+    ✓ Detected 65 larvae
+    Processing: IMG_8052.JPG
+    ✓ Detected 67 larvae
+    Processing: IMG_8053.JPG
+    ✓ Detected 66 larvae
+    Processing: IMG_8054.JPG
+    ✓ Detected 63 larvae
+    Processing: IMG_8055.JPG
+    ✓ Detected 64 larvae
+    Processing: IMG_8056.JPG
+    ✓ Detected 65 larvae
+    Processing: IMG_8057.JPG
+    ✓ Detected 65 larvae
+    Processing: IMG_8058.JPG
+    ✓ Detected 63 larvae
+    Processing: IMG_8059.JPG
+    ✓ Detected 60 larvae
+    Processing: IMG_8060.JPG
+    ✓ Detected 63 larvae
+    Processing: IMG_8061.JPG
+    ✓ Detected 62 larvae
+    Processing: IMG_8062.JPG
+    ✓ Detected 64 larvae
+    Processing: IMG_8063.JPG
+    ✓ Detected 68 larvae
+    Processing: IMG_8064.JPG
+    ✓ Detected 65 larvae
+    Processing: IMG_8065.JPG
+    ✓ Detected 64 larvae
+    Processing: IMG_8066.JPG
+    ✓ Detected 69 larvae
+    Processing: IMG_8067.JPG
+    ✓ Detected 66 larvae
+    Processing: IMG_8068.JPG
+    ✓ Detected 67 larvae
+    Processing: IMG_8069.JPG
+    ✓ Detected 69 larvae
+
+======================================================================
+Processing folder: 31.10
+======================================================================
+
+  Processing 30 images in 31.10
+    Processing: IMG_7376.JPG
+    ✓ Detected 70 larvae
+    Processing: IMG_7378.JPG
+    ✓ Detected 65 larvae
+    Processing: IMG_7380.JPG
+    ✓ Detected 69 larvae
+    Processing: IMG_7381.JPG
+    ✓ Detected 65 larvae
+    Processing: IMG_7382.JPG
+    ✓ Detected 68 larvae
+    Processing: IMG_7383.JPG
+    ✓ Detected 67 larvae
+    Processing: IMG_7384.JPG
+    ✓ Detected 69 larvae
+    Processing: IMG_7385.JPG
+    ✓ Detected 61 larvae
+    Processing: IMG_7386.JPG
+    ✓ Detected 67 larvae
+    Processing: IMG_7387.JPG
+    ✓ Detected 71 larvae
+    Processing: IMG_7388.JPG
+    ✓ Detected 68 larvae
+    Processing: IMG_7389.JPG
+    ✓ Detected 70 larvae
+    Processing: IMG_7390.JPG
+    ✓ Detected 66 larvae
+    Processing: IMG_7391.JPG
+    ✓ Detected 65 larvae
+    Processing: IMG_7392.JPG
+    ✓ Detected 66 larvae
+    Processing: IMG_7393.JPG
+    ✓ Detected 72 larvae
+    Processing: IMG_7394.JPG
+    ✓ Detected 65 larvae
+    Processing: IMG_7395.JPG
+    ✓ Detected 65 larvae
+    Processing: IMG_7396.JPG
+    ✓ Detected 70 larvae
+    Processing: IMG_7397.JPG
+    ✓ Detected 72 larvae
+    Processing: IMG_7398.JPG
+    ✓ Detected 70 larvae
+    Processing: IMG_7399.JPG
+    ✓ Detected 66 larvae
+    Processing: IMG_7400.JPG
+    ✓ Detected 65 larvae
+    Processing: IMG_7401.JPG
+    ✓ Detected 62 larvae
+    Processing: IMG_7402.JPG
+    ✓ Detected 70 larvae
+    Processing: IMG_7403.JPG
+    ✓ Detected 64 larvae
+    Processing: IMG_7404.JPG
+    ✓ Detected 67 larvae
+    Processing: IMG_7405.JPG
+    ✓ Detected 63 larvae
+    Processing: IMG_7406.JPG
+    ✓ Detected 62 larvae
+    Processing: IMG_7407.JPG
+    ✓ Detected 64 larvae
+
+======================================================================
+PIPELINE COMPLETE
+======================================================================
+Total images processed: 330
+Total larvae detected: 11399
+Global summary saved to: /Users/taircarmon/Desktop/growth_function_posture_aware/analysis_full/global_summary.csv
+End Time: 2026-02-28 15:02:03
+======================================================================
