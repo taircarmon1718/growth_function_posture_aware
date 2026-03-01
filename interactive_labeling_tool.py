@@ -22,8 +22,8 @@ ROOT_DIR = Path(__file__).parent / "analysis_full"
 OUTPUT_FILE = ROOT_DIR / "larva_quality_labels.xlsx"
 
 # Sampling Configuration
-IMAGES_PER_DATE = 3          # Number of images to sample per date folder
-LARVAE_PER_IMAGE = 8         # Number of larvae to sample per image
+IMAGES_PER_DATE = 6          # Number of images to sample per date folder
+LARVAE_PER_IMAGE = 10         # Number of larvae to sample per image
 RANDOM_SEED = 42             # For reproducible sampling
 
 # Display Configuration
@@ -50,13 +50,14 @@ def collect_all_larvae():
 
     larvae_inventory = {}
 
-    # Find all date folders
+    # Find all date folders (excluding 18.10)
     date_folders = sorted([
         d for d in ROOT_DIR.iterdir()
-        if d.is_dir() and d.name[0].isdigit()
+        if d.is_dir() and d.name[0].isdigit() and d.name != "18.10"
     ])
 
     print(f"\nFound {len(date_folders)} date folders: {[d.name for d in date_folders]}")
+    print(f"(Excluded: 18.10)")
 
     for date_folder in date_folders:
         date_name = date_folder.name
@@ -173,17 +174,17 @@ def load_existing_labels():
             print(f"\n⚠️  Warning: Could not load existing labels: {e}")
             return pd.DataFrame(columns=[
                 'date', 'image_name', 'larva_filename',
-                'is_valid_larva', 'is_valid_posture'
+                'is_valid_larva', 'shape_score'
             ])
     else:
         print(f"\n📝 No existing labels found. Starting fresh.")
         return pd.DataFrame(columns=[
             'date', 'image_name', 'larva_filename',
-            'is_valid_larva', 'is_valid_posture'
+            'is_valid_larva', 'shape_score'
         ])
 
 
-def save_label(labels_df, date, image_name, larva_filename, is_valid_larva, is_valid_posture):
+def save_label(labels_df, date, image_name, larva_filename, is_valid_larva, shape_score):
     """
     Saves a single label to the DataFrame and Excel file.
 
@@ -193,7 +194,7 @@ def save_label(labels_df, date, image_name, larva_filename, is_valid_larva, is_v
         image_name: Image folder name
         larva_filename: Larva filename
         is_valid_larva: Boolean or 0/1
-        is_valid_posture: Boolean or 0/1
+        shape_score: Integer 0/1/2 (0=no good, 1=ok, 2=great)
 
     Returns:
         pd.DataFrame: Updated labels DataFrame
@@ -204,7 +205,7 @@ def save_label(labels_df, date, image_name, larva_filename, is_valid_larva, is_v
         'image_name': image_name,
         'larva_filename': larva_filename,
         'is_valid_larva': int(is_valid_larva),
-        'is_valid_posture': int(is_valid_posture)
+        'shape_score': int(shape_score)
     }])
 
     # Append to existing labels
@@ -253,6 +254,7 @@ def is_already_labeled(labels_df, date, image_name, larva_filename):
 def display_larva(larva_path, date, image_name, larva_filename, current_idx, total_samples, labels_completed):
     """
     Displays a larva image with metadata overlay.
+    Shows ONLY the visual part (no morphometric text data).
 
     Args:
         larva_path: Path to larva image
@@ -276,19 +278,45 @@ def display_larva(larva_path, date, image_name, larva_filename, current_idx, tot
         print(f"❌ Failed to load: {larva_path}")
         return None
 
+    # Extract ONLY the visualization panels (remove text metrics section)
+    # The larva report images have: [original | mask | overlay] + [300px text panel]
+    # Structure from batch_analysis_pipeline.py:
+    # - visual panels (3 cropped panels side-by-side)
+    # - text panel (300 pixels wide, black background with white text)
+    img_h, img_w = img.shape[:2]
+
+    # Detect the text panel by finding where content transitions to black background
+    # The text panel is on the right side with a black (0,0,0) background
+    gray_check = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    # Scan from right to left to find the visual/text boundary
+    # Text panel has black background (intensity ~0)
+    visual_width = img_w
+    for x in range(img_w - 1, img_w // 2, -1):  # Start from right, stop at halfway
+        col_mean = np.mean(gray_check[:, x])
+        if col_mean > 20:  # Found non-black content
+            visual_width = x + 1
+            break
+
+    # If detection failed, fall back to removing rightmost ~25% (text panel is 300px out of ~1200px)
+    if visual_width == img_w:
+        visual_width = int(img_w * 0.75)
+
+    img_visual_only = img[:, :visual_width]
+
     # Create display canvas
     canvas = np.ones((DISPLAY_HEIGHT, DISPLAY_WIDTH, 3), dtype=np.uint8) * 240
 
     # Resize image to fit while maintaining aspect ratio
-    img_h, img_w = img.shape[:2]
+    vis_h, vis_w = img_visual_only.shape[:2]
     display_area_h = DISPLAY_HEIGHT - 200
     display_area_w = DISPLAY_WIDTH - 100
 
-    scale = min(display_area_w / img_w, display_area_h / img_h)
-    new_w = int(img_w * scale)
-    new_h = int(img_h * scale)
+    scale = min(display_area_w / vis_w, display_area_h / vis_h)
+    new_w = int(vis_w * scale)
+    new_h = int(vis_h * scale)
 
-    resized_img = cv2.resize(img, (new_w, new_h))
+    resized_img = cv2.resize(img_visual_only, (new_w, new_h))
 
     # Center the image
     y_offset = 150
@@ -317,38 +345,38 @@ def display_larva(larva_path, date, image_name, larva_filename, current_idx, tot
 
     cv2.putText(canvas, "INSTRUCTIONS:", (50, y_base + 20), font, 0.7, (0, 0, 139), 2)
     cv2.putText(canvas, "1. Is this a VALID LARVA? (1 = Yes, 0 = No)", (50, y_base + 50), font, 0.6, (0, 0, 0), 1)
-    cv2.putText(canvas, "2. Is POSTURE valid for measurement? (1 = Yes, 0 = No)", (50, y_base + 75), font, 0.6, (0, 0, 0), 1)
+    cv2.putText(canvas, "2. SHAPE SCORE: 0 = No Good, 1 = OK, 2 = Great Shape", (50, y_base + 75), font, 0.6, (0, 0, 0), 1)
     cv2.putText(canvas, "Press 'q' to quit and save", (800, y_base + 62), font, 0.6, (139, 0, 0), 2)
 
     return canvas
 
 
-def get_user_input(prompt_text):
+def get_user_input(prompt_text, valid_keys=['0', '1']):
     """
-    Gets a binary user input (0 or 1) via keyboard.
+    Gets user input via keyboard.
 
     Args:
         prompt_text: Text to display in console
+        valid_keys: List of valid key strings (default: ['0', '1'])
 
     Returns:
-        int or str: 0, 1, or 'q' to quit
+        int or str: Numeric value or 'q' to quit
     """
     while True:
         print(f"\n{prompt_text}", end=" ", flush=True)
 
         key = cv2.waitKey(0) & 0xFF
+        key_char = chr(key)
 
-        if key == ord('1'):
-            print("1 ✓")
-            return 1
-        elif key == ord('0'):
-            print("0 ✗")
-            return 0
+        if key_char in valid_keys:
+            print(f"{key_char} ✓")
+            return int(key_char)
         elif key == ord('q') or key == ord('Q'):
             print("q (quit)")
             return 'q'
         else:
-            print(f"Invalid key. Press 0, 1, or q.")
+            valid_str = ', '.join(valid_keys)
+            print(f"Invalid key. Press {valid_str}, or q.")
 
 
 # ======================== MAIN LABELING WORKFLOW ========================
@@ -433,28 +461,28 @@ def main():
             cv2.waitKey(1)  # Force refresh
 
             # Get user input for valid larva
-            valid_larva = get_user_input("Is this a VALID LARVA? (1=Yes, 0=No, q=Quit):")
+            valid_larva = get_user_input("Is this a VALID LARVA? (1=Yes, 0=No, q=Quit):", valid_keys=['0', '1'])
 
             if valid_larva == 'q':
                 print("\n⚠️  User requested quit.")
                 break
 
-            # Get user input for valid posture
-            valid_posture = get_user_input("Is POSTURE valid for measurement? (1=Yes, 0=No, q=Quit):")
+            # Get user input for shape score (0-2)
+            shape_score = get_user_input("SHAPE SCORE (0=No Good, 1=OK, 2=Great, q=Quit):", valid_keys=['0', '1', '2'])
 
-            if valid_posture == 'q':
+            if shape_score == 'q':
                 print("\n⚠️  User requested quit.")
                 break
 
             # Save the label
             labels_df = save_label(
                 labels_df, date, image_name, larva_filename,
-                valid_larva, valid_posture
+                valid_larva, shape_score
             )
 
             labels_completed += 1
 
-            print(f"✅ Label saved: valid_larva={valid_larva}, valid_posture={valid_posture}")
+            print(f"✅ Label saved: valid_larva={valid_larva}, shape_score={shape_score}")
 
     except KeyboardInterrupt:
         print("\n\n⚠️  Interrupted by user (Ctrl+C)")
@@ -473,11 +501,16 @@ def main():
         # Summary statistics
         if len(labels_df) > 0:
             valid_larvae = labels_df['is_valid_larva'].sum()
-            valid_postures = labels_df['is_valid_posture'].sum()
+            great_shapes = (labels_df['shape_score'] == 2).sum()
+            ok_shapes = (labels_df['shape_score'] == 1).sum()
+            no_good_shapes = (labels_df['shape_score'] == 0).sum()
 
             print("\n📊 SUMMARY STATISTICS:")
             print(f"  Valid larvae: {valid_larvae}/{len(labels_df)} ({100*valid_larvae/len(labels_df):.1f}%)")
-            print(f"  Valid postures: {valid_postures}/{len(labels_df)} ({100*valid_postures/len(labels_df):.1f}%)")
+            print(f"  Shape scores:")
+            print(f"    Great (2): {great_shapes}/{len(labels_df)} ({100*great_shapes/len(labels_df):.1f}%)")
+            print(f"    OK (1): {ok_shapes}/{len(labels_df)} ({100*ok_shapes/len(labels_df):.1f}%)")
+            print(f"    No Good (0): {no_good_shapes}/{len(labels_df)} ({100*no_good_shapes/len(labels_df):.1f}%)")
             print("="*70)
 
 

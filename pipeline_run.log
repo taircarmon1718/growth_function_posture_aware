@@ -1,0 +1,84 @@
+
+======================================================================
+LARVA SHAPE CLASSIFIER - 3-CLASS MODEL (IMPROVED)
+Classes: 0=Bad, 1=OK, 2=Great
+Training on valid larvae only, excluding date 18.10
+Using macro F1 for model selection
+======================================================================
+✓ Loaded 600 labels
+  Shape score distribution: {0: 428, 1: 123, 2: 49}
+  Valid larva distribution: {0: 377, 1: 223}
+  Valid larvae shape scores: {1: 123, 0: 51, 2: 49}
+Building dataset (valid larvae only, excluding 18.10)...
+  Total labels: 600, Valid larvae: 223
+  Built dataset: 223 samples, 26 features
+  Class distribution: {'Bad': 51, 'OK': 123, 'Great': 49}
+
+==================================================
+TRAINING 3-CLASS SHAPE MODEL
+==================================================
+Class distribution: {'Bad': 51, 'OK': 123, 'Great': 49}
+
+  Training RandomForest...
+    RF CV macro F1: 0.726 ± 0.051
+    RF Test: Accuracy=0.600, Macro F1=0.507
+  Training SVM...
+    SVM CV macro F1: 0.589 ± 0.036
+    SVM Test: Accuracy=0.511, Macro F1=0.413
+  Training GradientBoosting...
+    GB CV macro F1: 0.743 ± 0.025
+    GB Test: Accuracy=0.444, Macro F1=0.406
+
+  ✓ Selected: RF (Macro F1=0.507, Accuracy=0.600)
+
+  Classification Report:
+              precision    recall  f1-score   support
+
+         Bad       0.33      0.20      0.25        10
+          OK       0.65      0.80      0.71        25
+       Great       0.62      0.50      0.56        10
+
+    accuracy                           0.60        45
+   macro avg       0.53      0.50      0.51        45
+weighted avg       0.57      0.60      0.58        45
+
+  ✓ Feature importance plot saved
+
+✓ Found 11011 larvae to process (excluding 18.10)
+
+  Predicting 11011 larvae...
+    Processed 1000/11011...
+    Processed 2000/11011...
+    Processed 3000/11011...
+    Processed 4000/11011...
+    Processed 5000/11011...
+    Processed 6000/11011...
+    Processed 7000/11011...
+    Processed 8000/11011...
+    Processed 9000/11011...
+    Processed 10000/11011...
+    Processed 11000/11011...
+  ✓ Saved predictions: /Users/taircarmon/Desktop/growth_function_posture_aware/svm_shape_multiclass/predictions_all_larvae.xlsx
+
+==================================================
+PREDICTION SUMMARY
+==================================================
+  Bad: 1947 total, 116 high-confidence
+  OK: 6848 total, 656 high-confidence
+  Great: 2216 total, 50 high-confidence
+
+  Exporting results...
+  ✓ Copied 656 high-confidence OK larvae
+  ✓ Copied 50 high-confidence Great larvae
+  ✓ Exported examples per date
+
+  Creating visualizations...
+    ✓ OK body length plot saved
+    ✓ Great body length plot saved
+    ✓ Combined body length plot saved
+  ✓ Saved visualizations to /Users/taircarmon/Desktop/growth_function_posture_aware/svm_shape_multiclass/figures
+
+======================================================================
+PIPELINE COMPLETE
+Output directory: /Users/taircarmon/Desktop/growth_function_posture_aware/svm_shape_multiclass
+======================================================================

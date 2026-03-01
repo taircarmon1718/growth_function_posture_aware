@@ -1,0 +1,16 @@
+SVM Larva Classifier - Evaluation Report
+======================================================================
+
+Best parameters: {'C': 100, 'gamma': 0.1, 'kernel': 'rbf'}
+Best CV F1 score: 0.6163
+Test Accuracy: 0.6750
+
+Classification Report:
+              precision    recall  f1-score   support
+
+     Invalid       0.76      0.71      0.73        75
+       Valid       0.56      0.62      0.59        45
+
+    accuracy                           0.68       120
+   macro avg       0.66      0.66      0.66       120
+weighted avg       0.68      0.68      0.68       120

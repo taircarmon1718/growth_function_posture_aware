@@ -1,0 +1,84 @@
+======================================================================
+LARVAE LENGTH ANALYSIS - SUMMARY REPORT
+======================================================================
+Generated: 2026-03-01 09:40:16
+
+Total dates analyzed: 11
+Total larvae measured: 11399
+
+Per-Date Statistics:
+----------------------------------------------------------------------
+
+18.10:
+  Number of larvae: 388
+  Average length: 191.97 ± 279.64 pixels
+  Range: 2.00 - 1932.00 pixels
+  Median: 70.00 pixels
+
+19.10:
+  Number of larvae: 749
+  Average length: 60.97 ± 182.10 pixels
+  Range: 2.00 - 1408.00 pixels
+  Median: 14.00 pixels
+
+20.10:
+  Number of larvae: 610
+  Average length: 80.47 ± 158.06 pixels
+  Range: 2.00 - 803.00 pixels
+  Median: 13.00 pixels
+
+21.10:
+  Number of larvae: 466
+  Average length: 106.23 ± 217.92 pixels
+  Range: 2.00 - 1588.00 pixels
+  Median: 15.00 pixels
+
+24.10:
+  Number of larvae: 1340
+  Average length: 33.86 ± 88.80 pixels
+  Range: 1.00 - 1398.00 pixels
+  Median: 15.00 pixels
+
+25.10:
+  Number of larvae: 765
+  Average length: 44.74 ± 124.42 pixels
+  Range: 1.00 - 1387.00 pixels
+  Median: 19.00 pixels
+
+26.10:
+  Number of larvae: 689
+  Average length: 38.85 ± 99.53 pixels
+  Range: 1.00 - 1279.00 pixels
+  Median: 19.00 pixels
+
+27.10:
+  Number of larvae: 961
+  Average length: 59.08 ± 176.52 pixels
+  Range: 1.00 - 1491.00 pixels
+  Median: 21.00 pixels
+
+29.10:
+  Number of larvae: 1489
+  Average length: 53.89 ± 152.07 pixels
+  Range: 1.00 - 2618.00 pixels
+  Median: 24.00 pixels
+
+3.11:
+  Number of larvae: 1938
+  Average length: 49.01 ± 116.41 pixels
+  Range: 3.00 - 2531.00 pixels
+  Median: 27.00 pixels
+
+31.10:
+  Number of larvae: 2004
+  Average length: 44.58 ± 83.16 pixels
+  Range: 1.00 - 1045.00 pixels
+  Median: 30.00 pixels
+
+======================================================================
+Overall Statistics:
+----------------------------------------------------------------------
+  Grand mean length: 69.42 pixels
+  Std dev of means: 45.56 pixels
+  Range of means: 33.86 - 191.97 pixels
+======================================================================
