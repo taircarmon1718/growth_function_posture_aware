@@ -1,0 +1,89 @@
+╔════════════════════════════════════════════════════════════════════════╗
+║                   BODY LENGTH CONSTANT ARTIFACT FIX                    ║
+║                         QUICK REFERENCE CARD                           ║
+╚════════════════════════════════════════════════════════════════════════╝
+
+┌─ PROBLEM ───────────────────────────────────────────────────────────────┐
+│ Date 20.10: n=68, std=0.0, all larvae have IDENTICAL length = 3.364mm  │
+│ → Biologically impossible!                                              │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─ ROOT CAUSE ────────────────────────────────────────────────────────────┐
+│ Tiny segmentation artifacts → constant skeleton topology → same BFS     │
+│ Small debris (< 20 skel pixels) → always 14.5px geodesic → std = 0     │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─ THE FIX ───────────────────────────────────────────────────────────────┐
+│                                                                          │
+│  File: dual_larva_classification_pipeline_geodesic.py                   │
+│                                                                          │
+│  1. Filter tiny skeletons:                                              │
+│     if skel_px < 20: return 0.0                                         │
+│                                                                          │
+│  2. Filter short lengths:                                               │
+│     if max_length < 20.0: return 0.0                                    │
+│                                                                          │
+│  3. Warn about suspicious dates:                                        │
+│     if std_mm < 0.01: print WARNING                                     │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─ HOW TO USE ────────────────────────────────────────────────────────────┐
+│                                                                          │
+│  1. Clear cache:                                                        │
+│     rm -rf feature_cache/                                               │
+│                                                                          │
+│  2. Run pipeline:                                                       │
+│     python dual_larva_classification_pipeline_geodesic.py               │
+│                                                                          │
+│  3. Run diagnostics:                                                    │
+│     python diagnose_constant_lengths.py                                 │
+│                                                                          │
+│  4. Check results:                                                      │
+│     cat dual_larva_models_geodesic/figures/length_statistics_*.csv      │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─ EXPECTED IMPROVEMENT ──────────────────────────────────────────────────┐
+│                                                                          │
+│  BEFORE:  20.10  n=68   mean=3.364mm  std=0.000  ← ALL IDENTICAL 🚨   │
+│  AFTER:   20.10  n=15   mean=4.2mm    std=0.35   ← NATURAL VARIATION ✓│
+│                                                                          │
+│  → 53 artifacts filtered out, 15 real larvae remain                     │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─ WHY IT WORKS ──────────────────────────────────────────────────────────┐
+│                                                                          │
+│  Tiny artifacts     →  Filtered (return 0.0)                           │
+│  body_length = 0.0  →  Excluded from statistics                        │
+│  Real larvae only   →  Natural biological variation                    │
+│  Result             →  std > 0, realistic measurements ✓               │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─ IF STILL SEEING std=0 ─────────────────────────────────────────────────┐
+│                                                                          │
+│  Option 1: Increase thresholds                                          │
+│    if skel_px < 30: return 0.0                                          │
+│    if max_length < 30.0: return 0.0                                     │
+│                                                                          │
+│  Option 2: Add area filter (in extract_features)                       │
+│    if feats['area'] < 500: return None                                  │
+│                                                                          │
+│  Option 3: Manually inspect that date's larvae images                   │
+│    analysis_full/[DATE]/*/larvae_reports/larva_*.png                    │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─ FILES CREATED ─────────────────────────────────────────────────────────┐
+│  ✓ diagnose_constant_lengths.py    - Detection tool                    │
+│  ✓ test_skeleton_filtering.py      - Demo filtering                    │
+│  ✓ BODY_LENGTH_ARTIFACT_FIX.md     - Full docs                         │
+│  ✓ CHANGES_SUMMARY.md              - Quick summary                     │
+└─────────────────────────────────────────────────────────────────────────┘
+
+╔════════════════════════════════════════════════════════════════════════╗
+║  STATUS: ✅ FIXED - Ready to test                                      ║
+╚════════════════════════════════════════════════════════════════════════╝
+

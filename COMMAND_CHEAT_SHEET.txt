@@ -1,0 +1,142 @@
+╔══════════════════════════════════════════════════════════════════════╗
+║              GEODESIC PIPELINE FIX - COMMAND CHEAT SHEET             ║
+╚══════════════════════════════════════════════════════════════════════╝
+
+┌─ QUICK START ────────────────────────────────────────────────────────┐
+│                                                                       │
+│  Run everything in one command:                                      │
+│  ./run_fixed_pipeline.sh                                             │
+│                                                                       │
+│  Or manually:                                                        │
+│  python dual_larva_classification_pipeline_geodesic.py               │
+│  python compare_geodesic_results.py                                  │
+│                                                                       │
+└──────────────────────────────────────────────────────────────────────┘
+
+┌─ WHAT HAPPENS ───────────────────────────────────────────────────────┐
+│                                                                       │
+│  OLD (preserved):  dual_larva_models_geodesic/                       │
+│                    ├── Old cache with artifacts                      │
+│                    └── Original results (std=0 dates)                │
+│                                                                       │
+│  NEW (created):    dual_larva_models_geodesic2/                      │
+│                    ├── Fresh cache with filtering                    │
+│                    └── Fixed results (artifacts removed)             │
+│                                                                       │
+└──────────────────────────────────────────────────────────────────────┘
+
+┌─ VERIFICATION COMMANDS ──────────────────────────────────────────────┐
+│                                                                       │
+│  Check new directory exists:                                         │
+│  ls -ld dual_larva_models_geodesic2/                                 │
+│                                                                       │
+│  Check new cache created:                                            │
+│  ls -lh dual_larva_models_geodesic2/cached_all_features.pkl          │
+│                                                                       │
+│  View fixed statistics:                                              │
+│  cat dual_larva_models_geodesic2/figures/length_statistics_*.csv     │
+│                                                                       │
+│  Compare stats files:                                                │
+│  diff -y dual_larva_models_geodesic/figures/*.csv \                  │
+│          dual_larva_models_geodesic2/figures/*.csv                   │
+│                                                                       │
+└──────────────────────────────────────────────────────────────────────┘
+
+┌─ CHECK SPECIFIC DATE ────────────────────────────────────────────────┐
+│                                                                       │
+│  Check date 20.10 in original:                                       │
+│  python -c "import pandas as pd; \                                   │
+│    df = pd.read_csv('dual_larva_models_geodesic/figures/ \          │
+│         length_statistics_posture.csv'); \                           │
+│    print(df[df['date']=='20.10'])"                                   │
+│                                                                       │
+│  Check date 20.10 in fixed:                                          │
+│  python -c "import pandas as pd; \                                   │
+│    df = pd.read_csv('dual_larva_models_geodesic2/figures/ \         │
+│         length_statistics_posture.csv'); \                           │
+│    print(df[df['date']=='20.10'])"                                   │
+│                                                                       │
+└──────────────────────────────────────────────────────────────────────┘
+
+┌─ TROUBLESHOOTING ────────────────────────────────────────────────────┐
+│                                                                       │
+│  Results still identical? Delete new directory and rerun:            │
+│  rm -rf dual_larva_models_geodesic2/                                 │
+│  python dual_larva_classification_pipeline_geodesic.py               │
+│                                                                       │
+│  Need stricter filtering? Edit thresholds:                           │
+│  nano dual_larva_classification_pipeline_geodesic.py                 │
+│  # Change line ~268: if skel_px < 30 (was 20)                        │
+│  # Change lines ~286,295,308: if max_length < 30.0 (was 20.0)        │
+│                                                                       │
+│  Check pipeline output for warnings:                                 │
+│  python dual_larva_classification_pipeline_geodesic.py | grep "⚠️"   │
+│                                                                       │
+└──────────────────────────────────────────────────────────────────────┘
+
+┌─ USEFUL DIAGNOSTICS ─────────────────────────────────────────────────┐
+│                                                                       │
+│  Full diagnostic report:                                             │
+│  python diagnose_constant_lengths.py                                 │
+│                                                                       │
+│  Count artifacts filtered per date:                                  │
+│  python compare_geodesic_results.py | grep "Filtered:"               │
+│                                                                       │
+│  List dates with improvements:                                       │
+│  python compare_geodesic_results.py | grep "✓ FIXED"                 │
+│                                                                       │
+│  Show dates still problematic:                                       │
+│  python compare_geodesic_results.py | grep "⚠️"                      │
+│                                                                       │
+└──────────────────────────────────────────────────────────────────────┘
+
+┌─ BACKUP / RESTORE ───────────────────────────────────────────────────┐
+│                                                                       │
+│  Backup original (optional):                                         │
+│  cp -r dual_larva_models_geodesic dual_larva_models_geodesic_backup  │
+│                                                                       │
+│  Start fresh:                                                        │
+│  rm -rf dual_larva_models_geodesic2/                                 │
+│                                                                       │
+│  Revert to original pipeline:                                        │
+│  # Edit dual_larva_classification_pipeline_geodesic.py               │
+│  # Change OUTPUT_DIR back to "dual_larva_models_geodesic"            │
+│                                                                       │
+└──────────────────────────────────────────────────────────────────────┘
+
+┌─ EXPECTED OUTPUT ────────────────────────────────────────────────────┐
+│                                                                       │
+│  BEFORE (geodesic/):                                                 │
+│    20.10:  n=68   mean=3.364mm  std=0.000  ← ALL IDENTICAL 🚨       │
+│                                                                       │
+│  AFTER (geodesic2/):                                                 │
+│    20.10:  n=15   mean=4.2mm    std=0.35   ← VARIATION ✓            │
+│    → 53 artifacts filtered (tiny skeletons)                          │
+│                                                                       │
+└──────────────────────────────────────────────────────────────────────┘
+
+┌─ KEY FILES ──────────────────────────────────────────────────────────┐
+│                                                                       │
+│  📜 dual_larva_classification_pipeline_geodesic.py                   │
+│     → Main pipeline (outputs to geodesic2/)                          │
+│                                                                       │
+│  📊 compare_geodesic_results.py                                      │
+│     → Compare old vs new results                                     │
+│                                                                       │
+│  🔍 diagnose_constant_lengths.py                                     │
+│     → Detect constant-length artifacts                               │
+│                                                                       │
+│  🚀 run_fixed_pipeline.sh                                            │
+│     → One-command run + compare                                      │
+│                                                                       │
+│  📖 GEODESIC_COMPARISON_GUIDE.md                                     │
+│     → Full documentation                                             │
+│                                                                       │
+└──────────────────────────────────────────────────────────────────────┘
+
+╔══════════════════════════════════════════════════════════════════════╗
+║  STATUS: ✅ READY TO RUN                                             ║
+║                                                                       ║
+║  Execute:  ./run_fixed_pipeline.sh                                   ║
+╚══════════════════════════════════════════════════════════════════════╝
+

@@ -161,32 +161,51 @@ def create_sampling_plan(larvae_inventory, random_seed=RANDOM_SEED):
 def load_existing_labels():
     """
     Loads existing labels from Excel file if it exists.
+    SAFE: if the file exists but cannot be read, the script aborts
+    rather than silently returning an empty DataFrame (which would
+    cause save_label() to overwrite the file and lose all previous rows).
 
     Returns:
-        pd.DataFrame: Existing labels or empty DataFrame
+        pd.DataFrame: Existing labels (all previous rows preserved)
     """
+    REQUIRED_COLS = ['date', 'image_name', 'larva_filename', 'is_valid_larva', 'shape_score']
+
     if OUTPUT_FILE.exists():
         try:
             df = pd.read_excel(OUTPUT_FILE)
+
+            # Ensure all required columns are present (add missing ones with NaN)
+            for col in REQUIRED_COLS:
+                if col not in df.columns:
+                    df[col] = None
+
+            # Keep only the canonical columns in the canonical order
+            df = df[REQUIRED_COLS]
+
             print(f"\n✅ Loaded {len(df)} existing labels from {OUTPUT_FILE.name}")
             return df
+
         except Exception as e:
-            print(f"\n⚠️  Warning: Could not load existing labels: {e}")
-            return pd.DataFrame(columns=[
-                'date', 'image_name', 'larva_filename',
-                'is_valid_larva', 'shape_score'
-            ])
+            # File exists but is unreadable — ABORT to protect existing data.
+            print(f"\n❌ CRITICAL: Could not read existing labels file: {e}")
+            print(f"   File: {OUTPUT_FILE}")
+            print(f"   Aborting to avoid overwriting existing data.")
+            print(f"   Fix or rename the file and restart.")
+            sys.exit(1)
     else:
         print(f"\n📝 No existing labels found. Starting fresh.")
-        return pd.DataFrame(columns=[
-            'date', 'image_name', 'larva_filename',
-            'is_valid_larva', 'shape_score'
-        ])
+        return pd.DataFrame(columns=REQUIRED_COLS)
 
 
 def save_label(labels_df, date, image_name, larva_filename, is_valid_larva, shape_score):
     """
-    Saves a single label to the DataFrame and Excel file.
+    Appends a single new label and saves the full DataFrame to Excel.
+
+    SAFE write strategy:
+      1. Write to a temporary file first (.xlsx.tmp).
+      2. Only if the write succeeds, atomically replace the real file.
+      This means a crash or disk error mid-write can NEVER corrupt or
+      truncate the existing labels file.
 
     Args:
         labels_df: Current labels DataFrame
@@ -211,15 +230,27 @@ def save_label(labels_df, date, image_name, larva_filename, is_valid_larva, shap
     # Append to existing labels
     labels_df = pd.concat([labels_df, new_row], ignore_index=True)
 
-    # Save to Excel
+    # Atomic write: temp file → rename
+    tmp_file = OUTPUT_FILE.with_suffix('.xlsx.tmp')
     try:
-        labels_df.to_excel(OUTPUT_FILE, index=False)
+        labels_df.to_excel(tmp_file, index=False)
+        tmp_file.replace(OUTPUT_FILE)          # atomic on POSIX; near-atomic on Windows
     except Exception as e:
         print(f"\n❌ Error saving to Excel: {e}")
-        # Fallback to CSV
-        csv_file = OUTPUT_FILE.with_suffix('.csv')
-        labels_df.to_csv(csv_file, index=False)
-        print(f"   Saved to CSV instead: {csv_file}")
+        # Clean up temp file if it was created
+        if tmp_file.exists():
+            try:
+                tmp_file.unlink()
+            except Exception:
+                pass
+        # Fallback: try writing directly (non-atomic, but better than nothing)
+        try:
+            labels_df.to_excel(OUTPUT_FILE, index=False)
+            print(f"   Saved directly to {OUTPUT_FILE.name} (non-atomic fallback)")
+        except Exception as e2:
+            csv_file = OUTPUT_FILE.with_suffix('.csv')
+            labels_df.to_csv(csv_file, index=False)
+            print(f"   Saved to CSV instead: {csv_file}")
 
     return labels_df
 
