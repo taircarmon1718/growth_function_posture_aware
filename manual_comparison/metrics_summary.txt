@@ -1,0 +1,60 @@
+======================================================================
+AGREEMENT METRICS  v2  (developmental-day alignment)
+======================================================================
+  n data points              : 11
+  MAE                        : 1.9187 mm
+  RMSE                       : 2.0772 mm
+  Normalised RMSE            : 37.23 %
+  Mean Bias (Auto−Manual)    : +1.9187 mm
+  MAPE                       : 63.16 %
+  Pearson r                  : 0.9099  (p = 0.0001)
+  Spearman rho               : 0.9339  (p = 0.0000)
+  Lin's CCC                  : 0.5933
+  Regression slope           : 0.7951  95% CI [0.5217, 1.0684]
+    H₀: slope = 1            : p = 0.1242
+  Regression intercept       : 2.7464  95% CI [1.5250, 3.9679]
+    H₀: intercept = 0        : p = 0.0007
+  R²                         : 0.8279
+
+──────────────────────────────────────────────────────────────────────
+CENTRAL TENDENCY ROBUSTNESS
+──────────────────────────────────────────────────────────────────────
+  Mean             MAE=1.9187  RMSE=2.0772  Bias=+1.9187  MAPE=63.16%  nRMSE=37.23%
+  Median           MAE=1.7725  RMSE=1.9804  Bias=+1.7626  MAPE=59.69%  nRMSE=35.49%
+  Trimmed-Mean     MAE=1.8337  RMSE=2.0150  Bias=+1.8337  MAPE=60.94%  nRMSE=36.11%
+  → Best estimator by MAE: Median
+
+──────────────────────────────────────────────────────────────────────
+HETEROSCEDASTICITY & PROPORTIONAL BIAS
+──────────────────────────────────────────────────────────────────────
+  |diff| vs mean length      : rho = -0.1636,  p = 0.6307
+  diff  vs mean length       : rho = -0.1636, p = 0.6307
+
+──────────────────────────────────────────────────────────────────────
+BOOTSTRAP CIs  (n = 2000 resamples)
+──────────────────────────────────────────────────────────────────────
+  MAE   95% CI               : [1.4433, 2.3887] mm
+  Bias  95% CI               : [1.4433, 2.3887] mm
+  Slope 95% CI               : [0.5470, 1.2622]
+
+──────────────────────────────────────────────────────────────────────
+OUTLIER SENSITIVITY  (top-5% extreme diffs removed)
+──────────────────────────────────────────────────────────────────────
+  n removed                  : 1  (|diff| > 2.893 mm)
+  MAE   full / trimmed       : 1.9187 / 1.8133 mm
+  RMSE  full / trimmed       : 2.0772 / 1.9653 mm
+  Bias  full / trimmed       : +1.9187 / +1.8133 mm
+
+──────────────────────────────────────────────────────────────────────
+STATISTICAL TESTS
+──────────────────────────────────────────────────────────────────────
+  Shapiro–Wilk p-value       : 0.3632  → normal differences
+  Paired t-test              : t = 7.625,  p = 0.0000
+  Wilcoxon signed-rank       : W = 0.0,  p = 0.0010
+
+BLAND–ALTMAN
+  Mean bias                  : +1.9187 mm
+  SD of differences          : 0.8346 mm
+  95% LoA lower              : 0.2829 mm
+  95% LoA upper              : 3.5545 mm
+======================================================================

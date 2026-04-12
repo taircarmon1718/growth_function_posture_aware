@@ -1,0 +1,13 @@
+Gompertz model comparison — automated vs manual
+
+Automated fit: A=8.667 mm, k=0.1713 day^-1, t0=1.312 days; R2=0.954, RMSE=0.356 mm
+Manual fit   : A=18.773 mm, k=0.0636 day^-1, t0=15.557 days; R2=0.991, RMSE=0.186 mm
+
+Curve similarity (mean absolute diff) = 2.077 mm
+
+Results:
+ The Gompertz model fit quality: automated R² = 0.954; manual R² = 0.991.
+ Asymptotic size (A): automated = 8.67 mm; manual = 18.77 mm.
+ Growth rate (k): automated = 0.1713 day⁻¹; manual = 0.0636 day⁻¹.
+ Inflection time (t0): automated = 1.31 days; manual = 15.56 days.
+ Interpretation: compare k and t0 to assess whether the automated pipeline preserves the temporal dynamics of growth; MAD gives curve-level deviation independent of scale.

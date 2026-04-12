@@ -1,0 +1,15 @@
+Model     : RandomForest
+Criterion : class-1 F1
+CV mean class-1 F1 : 0.7684 ± 0.0239
+CV mean accuracy         : 0.8250 ± 0.0195
+Training samples (after upsample): 1330
+
+Classification report on FULL dataset (after retrain):
+              precision    recall  f1-score   support
+
+   Not Valid       0.98      0.91      0.94       749
+       Valid       0.87      0.97      0.92       451
+
+    accuracy                           0.93      1200
+   macro avg       0.92      0.94      0.93      1200
+weighted avg       0.94      0.93      0.93      1200

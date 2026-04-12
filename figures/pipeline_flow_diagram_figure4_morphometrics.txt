@@ -1,0 +1,3 @@
+Selected larva: larva_008.png (image: IMG_3778)
+Pixel-to-mm (from prediction): 0.232256 mm/px
+Measured length: 20.80 px (4.83 mm)

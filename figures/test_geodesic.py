@@ -17,15 +17,15 @@ print("Starting test script...")
 # Create a simple T-shaped skeleton for testing
 def create_test_skeleton():
     skel = np.zeros((30, 30), dtype=np.uint8)
-
+    
     # Vertical line
     for r in range(10, 25):
         skel[r, 15] = 1
-
+    
     # Horizontal line
     for c in range(8, 23):
         skel[15, c] = 1
-
+    
     return skel
 
 def _neighbour_count(skel):
@@ -65,43 +65,43 @@ def _bfs_path(skel, start, goal):
 def find_longest_path(skel, endpoints):
     if len(endpoints) < 2:
         return []
-
+    
     longest_path = []
     max_len = -1.0
-
+    
     for i in range(len(endpoints)):
         for j in range(i + 1, len(endpoints)):
             path, length = _bfs_path(skel, endpoints[i], endpoints[j])
             if length > max_len:
                 max_len = length
                 longest_path = path
-
+    
     return longest_path
 
 def main():
     print("Creating test skeleton...")
     skel = create_test_skeleton()
-
+    
     print("Finding topology...")
     endpoints, junctions = _find_topology(skel)
     print(f"Found {len(endpoints)} endpoints, {len(junctions)} junctions")
-
+    
     print("Finding longest path...")
     longest_path = find_longest_path(skel, endpoints)
     print(f"Longest path has {len(longest_path)} points")
-
+    
     if longest_path:
         length = _geodesic_length(longest_path)
         print(f"Path length: {length:.2f} pixels")
-
+    
     # Create a simple visualization
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
-
+    
     # Show skeleton
     ax1.imshow(skel, cmap='gray')
     ax1.set_title("Test Skeleton")
     ax1.axis('off')
-
+    
     # Show path
     ax2.imshow(skel, cmap='gray')
     if longest_path:
@@ -112,11 +112,11 @@ def main():
         ax2.scatter(ep_arr[:, 1], ep_arr[:, 0], c='blue', s=50)
     ax2.set_title("Longest Geodesic Path")
     ax2.axis('off')
-
+    
     output_path = Path(__file__).parent / "test_geodesic.png"
     fig.savefig(output_path, dpi=150, bbox_inches='tight')
     plt.close()
-
+    
     print(f"Saved test figure to: {output_path}")
     print("Test completed successfully!")
 

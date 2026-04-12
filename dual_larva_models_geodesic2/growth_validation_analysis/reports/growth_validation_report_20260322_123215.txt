@@ -1,0 +1,84 @@
+
+========================================================================
+STEP 1 – PER-DATE OVERVIEW
+========================================================================
+  Statistics computed using pipeline weighting: weight = 0.7*valid_confidence + 0.3*posture_confidence (posture NaN → use valid_confidence).
+  
+  ▸ 19.10  n=92
+    • mean=3.478  std=0.549  pct_prev=nan%  pct_first=0.00%
+    • range=[2.71, 6.29]  IQR=0.392
+  ▸ 20.10  n=18
+    • mean=3.542  std=0.263  pct_prev=1.85%  pct_first=1.85%
+    • range=[3.16, 4.15]  IQR=0.398
+  ▸ 21.10  n=37
+    • mean=3.547  std=0.525  pct_prev=0.14%  pct_first=1.99%
+    • range=[2.78, 5.36]  IQR=0.376
+  ▸ 24.10  n=28
+    • mean=5.583  std=1.065  pct_prev=57.38%  pct_first=60.52%
+    • range=[3.61, 8.12]  IQR=0.684
+  ▸ 25.10  n=37
+    • mean=5.722  std=1.602  pct_prev=2.49%  pct_first=64.52%
+    • range=[2.91, 9.10]  IQR=2.135
+  ▸ 26.10  n=32
+    • mean=6.223  std=1.613  pct_prev=8.77%  pct_first=78.94%
+    • range=[3.44, 12.07]  IQR=0.944
+  ▸ 27.10  n=41
+    • mean=6.679  std=1.292  pct_prev=7.31%  pct_first=92.03%
+    • range=[3.26, 9.75]  IQR=2.192
+  ▸ 29.10  n=47
+    • mean=7.898  std=1.778  pct_prev=18.26%  pct_first=127.08%
+    • range=[3.77, 12.07]  IQR=2.514
+  ▸ 31.10  n=90
+    • mean=7.585  std=1.899  pct_prev=-3.97%  pct_first=118.07%
+    • range=[3.25, 12.46]  IQR=3.122
+  ▸ 3.11  n=54
+    • mean=7.603  std=2.126  pct_prev=0.25%  pct_first=118.61%
+    • range=[3.19, 13.79]  IQR=1.893
+
+========================================================================
+STEP 2 – DISTRIBUTION SHAPES
+========================================================================
+    • Shapiro-Wilk: 5/10 dates consistent with normality (p>0.05)
+    • D'Agostino:   6/10 dates consistent with normality (p>0.05)
+    ✓  Most dates are approximately normal — parametric tests are broadly applicable.
+
+========================================================================
+STEP 3 – OUTLIER AUDIT
+========================================================================
+  Outlier detection using Grubbs' test, IQR method, and Z-score method.
+  Results saved in 'outlier_audit.csv'.
+  Plots saved as '03_outlier_detection_DATE.png'.
+
+========================================================================
+STEP 2B – COHORT STRUCTURE ANALYSIS
+========================================================================
+  Objective: Determine if daily distributions represent single populations or mixtures of cohorts.
+    • Dates analyzed: 10/10 (≥15 larvae required)
+    • Dates with likely multimodal structure: 4/10
+    • Dates showing cohort structure: 19.10, 21.10, 26.10, 3.11
+    ⚠  COHORT MIXING DETECTED: 4 dates show evidence of multiple cohorts.
+  This suggests overlapping larval populations from different hatching events.
+  Mean body length may not accurately represent a single growing cohort.
+    ⚠  Multiple dates show cohort structure — this could explain non-monotonic growth patterns.
+  The observed 'growth curve' may actually represent shifting cohort composition over time,
+  rather than true ontogenetic growth of a single cohort.
+
+========================================================================
+STEP 2D – KDE-BASED COHORT DECOMPOSITION
+========================================================================
+  Non-parametric cohort identification using kernel density estimation and peak detection.
+  This method does NOT assume Gaussian distributions.
+  
+    • Dates analyzed: 10/10
+    • Dates with 1 cohort: 9
+    • Dates with multiple cohorts: 1
+    • Dates with multiple cohorts: 27.10
+  
+    ⚠  MULTIPLE COHORTS DETECTED (KDE method): 1 dates show multimodal structure.
+    • Average cohort separation (peak distance): 2.026 mm
+  Large separation suggests distinct cohorts with minimal overlap.
+  
+  COMPARISON WITH GMM (Step 2C):
+  • KDE method: Non-parametric, detects any multimodal structure
+  • GMM method: Parametric, assumes Gaussian components
+  • Convergent evidence from both methods strengthens cohort hypothesis

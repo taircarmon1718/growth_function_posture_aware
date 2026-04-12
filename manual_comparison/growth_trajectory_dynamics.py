@@ -600,6 +600,369 @@ def save_dynamics_summary(norm: dict, inc: dict, rgr: dict, gomp: dict):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+#  ADDITIONAL: DEEP GROWTH DYNAMICS PRESERVATION ANALYSIS (appended, non-intrusive)
+#
+#  Adds: trend consistency, rank-based temporal consistency, monotonicity checks,
+#  shape similarity (DTW + Euclidean on normalized curves), phase-based analysis,
+#  sensitivity to offset removal, combined trend agreement score, and an
+#  interpretation block. Results saved to `growth_dynamics_deep_analysis.txt` and
+#  two new figures: `fig13_trend_alignment.png`, `fig14_normalized_shape.png`.
+#
+#  This block does not modify any existing functions or files; it only reads the
+#  `comp` DataFrame produced earlier and appends new outputs.
+# ══════════════════════════════════════════════════════════════════════════════
+def _lowess_smoother(x, y, frac=0.4):
+    """Try LOWESS (statsmodels). If not available, fall back to Savitzky-Golay.
+    Returns smoothed y array aligned with x."""
+    try:
+        from statsmodels.nonparametric.smoothers_lowess import lowess as _sm_lowess
+        out = _sm_lowess(y, x, frac=frac, return_sorted=False)
+        # statsmodels may return list-like; ensure numpy array
+        return np.asarray(out)
+    except Exception:
+        # fallback
+        try:
+            from scipy.signal import savgol_filter
+            n = len(y)
+            if n < 5:
+                return np.asarray(y)
+            # choose an odd window <= n
+            win = min(5, n if n % 2 == 1 else n - 1)
+            win = max(3, win)
+            return savgol_filter(y, window_length=win, polyorder=2, mode='interp')
+        except Exception:
+            return np.asarray(y)
+
+
+def _dtw_distance(a, b):
+    """Simple dynamic time warping (absolute distance). O(n*m).
+    Small series (n~10) makes this acceptable."""
+    a = np.asarray(a, dtype=float)
+    b = np.asarray(b, dtype=float)
+    n, m = len(a), len(b)
+    # cost matrix with one-based indexing
+    D = np.full((n + 1, m + 1), np.inf)
+    D[0, 0] = 0.0
+    for i in range(1, n + 1):
+        for j in range(1, m + 1):
+            cost = abs(a[i - 1] - b[j - 1])
+            D[i, j] = cost + min(D[i - 1, j], D[i, j - 1], D[i - 1, j - 1])
+    return float(D[n, m])
+
+
+def _normalize_to_unit(x):
+    x = np.asarray(x, dtype=float)
+    mn, mx = x.min(), x.max()
+    if mx <= mn:
+        return np.zeros_like(x)
+    return (x - mn) / (mx - mn)
+
+
+def run_deep_analysis(comp: pd.DataFrame, norm: dict, inc: dict, rgr: dict, gomp: dict):
+    """Run the appended deep-preservation analyses and save results/figures.
+
+    Returns a dict with computed metrics.
+    """
+    from scipy.stats import spearmanr, kendalltau
+
+    days = comp["dev_day"].values.astype(float)
+    m = comp["manual_mean_mm"].values.astype(float)
+    a = comp["auto_mean_mm"].values.astype(float)
+
+    results = {}
+
+    # ---------- 1. TREND CONSISTENCY (LOWESS smoothed curves) ----------
+    frac = 0.4
+    m_s = _lowess_smoother(days, m, frac=frac)
+    a_s = _lowess_smoother(days, a, frac=frac)
+
+    # correlation between smoothed curves
+    try:
+        r_sm, p_sm = _safe_pearsonr(m_s, a_s)
+    except Exception:
+        r_sm, p_sm = float('nan'), float('nan')
+
+    # second derivative (numerical) — curvature
+    d2m = np.gradient(np.gradient(m_s, days), days)
+    d2a = np.gradient(np.gradient(a_s, days), days)
+    try:
+        r_curv, p_curv = _safe_pearsonr(d2m, d2a)
+    except Exception:
+        r_curv, p_curv = float('nan'), float('nan')
+
+    # growth phase alignment heuristic: detect phase regions via smoothed slope
+    slope_m = np.gradient(m_s, days)
+    slope_a = np.gradient(a_s, days)
+    # phases: slow when slope low, fast when slope high, plateau when slope near 0
+    thr_slow = np.percentile(slope_m, 40)
+    thr_fast = np.percentile(slope_m, 80)
+    def phase_labels(slope):
+        labs = []
+        for s in slope:
+            if s <= thr_slow:
+                labs.append('slow')
+            elif s >= thr_fast:
+                labs.append('fast')
+            else:
+                labs.append('mid')
+        return np.array(labs)
+
+    ph_m = phase_labels(slope_m)
+    ph_a = phase_labels(slope_a)
+    phase_match_pct = float(np.mean(ph_m == ph_a))
+
+    results['trend'] = dict(r_sm=r_sm, p_sm=p_sm, r_curv=r_curv, p_curv=p_curv, phase_match_pct=phase_match_pct,
+                            m_s=m_s, a_s=a_s, d2m=d2m, d2a=d2a)
+
+    # ───────── Figure 13: Smoothed trend alignment ──────────────────────
+    fig, ax = plt.subplots(figsize=(9, 4.8))
+    ax.plot(days, m_s, 'o-', color=COL_MAN, lw=2, ms=6, label='Manual (LOWESS)')
+    ax.plot(days, a_s, 's--', color=COL_AUTO, lw=2, ms=6, label='Automated (LOWESS)')
+    ax.fill_between(days, m_s - np.std(m - m_s), m_s + np.std(m - m_s), color=COL_MAN, alpha=0.12)
+    ax.fill_between(days, a_s - np.std(a - a_s), a_s + np.std(a - a_s), color=COL_AUTO, alpha=0.10)
+    ax.set_xlabel('Developmental Day')
+    ax.set_ylabel('Smoothed Body Length (mm)')
+    ax.set_title('Trend Alignment: LOWESS-smoothed Manual vs Automated')
+    ax.grid(axis='y', ls=':', alpha=0.5)
+    ax.legend(frameon=False)
+    ax.text(0.02, 0.97, f'Smoothed Pearson r = {r_sm:.3f}   Curvature r = {r_curv:.3f}\nPhase match = {phase_match_pct*100:.1f}%',
+            transform=ax.transAxes, va='top', fontsize=8.5,
+            bbox=dict(boxstyle='round,pad=0.3', facecolor='#F0F3F4', alpha=0.85))
+    plt.tight_layout()
+    fig.savefig(OUT_DIR / 'fig13_trend_alignment.png', dpi=200, bbox_inches='tight')
+    plt.close()
+
+    print('  ✓ fig13_trend_alignment.png')
+
+    # ---------- 2. RANK-BASED TEMPORAL CONSISTENCY ----------
+    # Spearman and Kendall on raw, normalized, and increments
+    # raw
+    sp_raw, sp_raw_p = spearmanr(m, a)
+    kt_raw, kt_raw_p = kendalltau(m, a)
+    # normalized (min-max)
+    m_norm = _normalize_to_unit(m)
+    a_norm = _normalize_to_unit(a)
+    sp_norm, sp_norm_p = spearmanr(m_norm, a_norm)
+    kt_norm, kt_norm_p = kendalltau(m_norm, a_norm)
+    # increments
+    dm = np.diff(m)
+    da = np.diff(a)
+    # if increments constant, spearman may be nan; handle with try
+    try:
+        sp_inc, sp_inc_p = spearmanr(dm, da)
+    except Exception:
+        sp_inc, sp_inc_p = float('nan'), float('nan')
+    try:
+        kt_inc, kt_inc_p = kendalltau(dm, da)
+    except Exception:
+        kt_inc, kt_inc_p = float('nan'), float('nan')
+
+    results['rank'] = dict(
+        spearman_raw=(float(sp_raw), float(sp_raw_p)),
+        kendall_raw=(float(kt_raw), float(kt_raw_p)),
+        spearman_norm=(float(sp_norm), float(sp_norm_p)),
+        kendall_norm=(float(kt_norm), float(kt_norm_p)),
+        spearman_inc=(float(sp_inc), float(sp_inc_p)),
+        kendall_inc=(float(kt_inc), float(kt_inc_p)),
+    )
+
+    # ---------- 3. MONOTONICITY AND TREND VIOLATIONS ----------
+    def monotonic_violations(series):
+        diffs = np.diff(series)
+        violations = np.sum(diffs < -1e-9)
+        total = len(diffs)
+        pct = float(violations) / max(total, 1)
+        return int(violations), total, pct
+
+    v_m, t_m, pct_m = monotonic_violations(m)
+    v_a, t_a, pct_a = monotonic_violations(a)
+    results['monotonic'] = dict(manual=(v_m, t_m, pct_m), auto=(v_a, t_a, pct_a))
+
+    # ---------- 4. SHAPE SIMILARITY (normalize to [0,1]) ----------
+    m_u = _normalize_to_unit(m)
+    a_u = _normalize_to_unit(a)
+    # DTW distance
+    dtw_dist = _dtw_distance(m_u, a_u)
+    # Euclidean distance (same length assumed)
+    try:
+        euc = float(np.linalg.norm(m_u - a_u))
+    except Exception:
+        euc = float('nan')
+    # Convert DTW to similarity in [0,1]: sim = 1/(1 + (dtw_dist / L)) where L ~ length
+    L = max(1.0, float(len(m_u)))
+    dtw_sim = 1.0 / (1.0 + (dtw_dist / L))
+    results['shape'] = dict(dtw_dist=dtw_dist, dtw_sim=dtw_sim, euclidean=euc, m_u=m_u, a_u=a_u)
+
+    # ───────── Figure 14: Normalized shape comparison ─────────────────────
+    fig, ax = plt.subplots(figsize=(9, 4.6))
+    ax.plot(days, m_u, 'o-', color=COL_MAN, lw=2, ms=6, label='Manual (normalized)')
+    ax.plot(days, a_u, 's--', color=COL_AUTO, lw=2, ms=6, label='Automated (normalized)')
+    ax.set_xlabel('Developmental Day')
+    ax.set_ylabel('Normalized body length (0–1)')
+    ax.set_title('Normalized Shape Comparison: Manual vs Automated')
+    ax.grid(axis='y', ls=':', alpha=0.5)
+    ax.legend(frameon=False)
+    ax.text(0.02, 0.95, f'DTW dist = {dtw_dist:.3f}   Euclidean = {euc:.3f}   DTW sim = {dtw_sim:.3f}',
+            transform=ax.transAxes, fontsize=8.5, va='top',
+            bbox=dict(boxstyle='round,pad=0.3', facecolor='#F0F3F4', alpha=0.85))
+    plt.tight_layout()
+    fig.savefig(OUT_DIR / 'fig14_normalized_shape.png', dpi=200, bbox_inches='tight')
+    plt.close()
+    print('  ✓ fig14_normalized_shape.png')
+
+    # ---------- 5. PHASE-BASED ANALYSIS ----------
+    phases = dict(early=(1, 3), mid=(6, 9), late=(11, 16))
+    phase_results = {}
+    for phase_name, (lo, hi) in phases.items():
+        mask = (days >= lo) & (days <= hi)
+        if mask.sum() < 2:
+            phase_results[phase_name] = dict(n=0)
+            continue
+        xd = days[mask]
+        ym = m[mask]
+        ya = a[mask]
+        # slope via linear regression
+        lm = np.polyfit(xd, ym, 1)
+        la = np.polyfit(xd, ya, 1)
+        slope_m = float(lm[0])
+        slope_a = float(la[0])
+        # correlation in phase
+        ph_sp, ph_p = spearmanr(ym, ya)
+        phase_results[phase_name] = dict(n=int(mask.sum()), slope_manual=slope_m, slope_auto=slope_a,
+                                         spearman=float(ph_sp), spearman_p=float(ph_p),
+                                         slope_diff=abs(slope_a - slope_m))
+    results['phases'] = phase_results
+
+    # ---------- 6. SENSITIVITY TO OFFSET REMOVAL ----------
+    # raw correlation
+    r_raw, p_raw = _safe_pearsonr(m, a)
+    # offset-normalized (subtract Day 1)
+    r_offset, p_offset = _safe_pearsonr(m - m[0], a - a[0])
+    # z-score normalized
+    def zscore(x):
+        x = np.asarray(x, dtype=float)
+        s = np.std(x)
+        if s <= 0:
+            return x - np.mean(x)
+        return (x - np.mean(x)) / s
+    r_z, p_z = _safe_pearsonr(zscore(m), zscore(a))
+    results['sensitivity'] = dict(r_raw=r_raw, r_offset=r_offset, r_z=r_z,
+                                  p_raw=p_raw, p_offset=p_offset, p_z=p_z)
+
+    # ---------- 7. ROBUST TREND AGREEMENT SCORE ----------
+    # Normalize correlations to [0,1] via (r+1)/2, use absolute for monotonicity
+    def norm_r(r):
+        if np.isnan(r):
+            return 0.0
+        return float((abs(r) + 0.0) / 1.0)  # abs(r) already in [0,1]
+
+    pr = _safe_pearsonr(m, a)[0]
+    sr = spearmanr(m, a)[0]
+    inc_corr = _safe_pearsonr(np.diff(m), np.diff(a))[0]
+    # dtw_sim computed earlier
+    comp_pr = norm_r(pr)
+    comp_sr = 0.0 if np.isnan(sr) else abs(float(sr))
+    comp_inc = 0.0 if np.isnan(inc_corr) else abs(float(inc_corr))
+    comp_dtw = float(dtw_sim)
+    trend_score = float(np.nanmean([comp_pr, comp_sr, comp_inc, comp_dtw]))
+    results['trend_score'] = dict(pr=comp_pr, sr=comp_sr, inc=comp_inc, dtw=comp_dtw, trend_score=trend_score)
+
+    # ---------- 8. AUTOMATIC INTERPRETATION ----------
+    conclusions = []
+    # Global trend
+    if r_sm >= 0.85 and trend_score >= 0.7:
+        conclusions.append(('global_trend', True,
+                            'The automated system preserves the global shape of the growth trajectory after smoothing.'))
+    else:
+        conclusions.append(('global_trend', False,
+                            'The automated trajectory differs in smoothed trend from manual measurements.'))
+    # Temporal ordering
+    if results['rank']['spearman_norm'][0] >= 0.8 and results['rank']['kendall_norm'][0] >= 0.6:
+        conclusions.append(('temporal_ordering', True,
+                            'Temporal ordering of growth is well-preserved (high rank correlations).'))
+    else:
+        conclusions.append(('temporal_ordering', False,
+                            'Temporal ordering shows discrepancies between methods.'))
+    # Growth phases
+    if phase_results['early'].get('n', 0) > 1 and phase_results['mid'].get('n', 0) > 1 and phase_results['late'].get('n', 0) > 1:
+        # check where slope differences largest
+        slope_diffs = {p: phase_results[p].get('slope_diff', 0.0) for p in phase_results}
+        worst_phase = max(slope_diffs, key=lambda k: slope_diffs[k])
+        if phase_results['mid']['spearman'] >= 0.6 or phase_results['early']['spearman'] >= 0.6:
+            conclusions.append(('growth_phases', True,
+                                f'Growth phases broadly align; largest disagreement in: {worst_phase}.'))
+        else:
+            conclusions.append(('growth_phases', False,
+                                'Phase-wise dynamics differ substantially between methods.'))
+    else:
+        conclusions.append(('growth_phases', False,
+                            'Insufficient samples in one or more phases to conclude.'))
+
+    # Local dynamics
+    if results['monotonic']['manual'][2] <= 0.1 and results['monotonic']['auto'][2] <= 0.2:
+        conclusions.append(('local_dynamics', True,
+                            'Local dynamics (monotonicity / small violations) are reasonably preserved.'))
+    else:
+        conclusions.append(('local_dynamics', False,
+                            'Local dynamics show differences; automated has more trend violations.'))
+
+    results['conclusions'] = conclusions
+
+    # ───────── Save text summary ──────────────────────────────────────────
+    lines = []
+    lines.append('=' * 70)
+    lines.append('DEEP GROWTH DYNAMICS PRESERVATION ANALYSIS')
+    lines.append('=' * 70)
+    lines.append('')
+    lines.append('1) Trend consistency (LOWESS smoothed)')
+    lines.append(f'   Smoothed Pearson r = {r_sm:.4f} (p = {p_sm:.4f})')
+    lines.append(f'   Curvature (2nd deriv) Pearson r = {r_curv:.4f} (p = {p_curv:.4f})')
+    lines.append(f'   Phase label agreement = {phase_match_pct*100:.1f}%')
+    lines.append('')
+    lines.append('2) Rank-based temporal consistency')
+    lines.append("   Spearman (raw)   = {:.4f} (p={:.4f})".format(results['rank']['spearman_raw'][0], results['rank']['spearman_raw'][1]))
+    lines.append("   Kendall  (raw)   = {:.4f} (p={:.4f})".format(results['rank']['kendall_raw'][0], results['rank']['kendall_raw'][1]))
+    lines.append("   Spearman (norm)  = {:.4f} (p={:.4f})".format(results['rank']['spearman_norm'][0], results['rank']['spearman_norm'][1]))
+    lines.append("   Kendall  (norm)  = {:.4f} (p={:.4f})".format(results['rank']['kendall_norm'][0], results['rank']['kendall_norm'][1]))
+    lines.append("   Spearman (inc)   = {:.4f} (p={:.4f})".format(results['rank']['spearman_inc'][0], results['rank']['spearman_inc'][1]))
+    lines.append('')
+    lines.append('3) Monotonicity and trend violations')
+    lines.append(f'   Manual violations  = {v_m}/{t_m} ({pct_m*100:.1f}%)')
+    lines.append(f'   Auto   violations  = {v_a}/{t_a} ({pct_a*100:.1f}%)')
+    lines.append('')
+    lines.append('4) Shape similarity (scale-free)')
+    lines.append(f'   DTW distance      = {dtw_dist:.4f}   (similarity = {dtw_sim:.4f})')
+    lines.append(f'   Euclidean (normed) = {euc:.4f}')
+    lines.append('')
+    lines.append('5) Phase-based slopes and agreement')
+    for p, info in phase_results.items():
+        if info.get('n', 0) == 0:
+            lines.append(f'   {p.title():<6}: insufficient samples')
+        else:
+            lines.append(f"   {p.title():<6}: n={info['n']}, slope_manual={info['slope_manual']:.4f}, slope_auto={info['slope_auto']:.4f}, spearman={info['spearman']:.3f}")
+    lines.append('')
+    lines.append('6) Sensitivity to offset / normalization')
+    lines.append('   Pearson raw       = {:.4f}   offset-normalized = {:.4f}   z-score = {:.4f}'.format(r_raw, r_offset, r_z))
+    lines.append('')
+    lines.append('7) Robust trend agreement score')
+    lines.append('   Components: pearson={:.3f}, spearman={:.3f}, increments={:.3f}, dtw={:.3f}'.format(comp_pr, comp_sr, comp_inc, comp_dtw))
+    lines.append('   Final trend_score = {:.3f} (0=poor → 1=excellent)'.format(trend_score))
+    lines.append('')
+    lines.append('8) Interpretation (automated summary)')
+    for tag, ok, msg in conclusions:
+        status = 'PRESERVED' if ok else 'NOT PRESERVED'
+        lines.append(f'   {tag}: {status} -- {msg}')
+    lines.append('')
+    lines.append('=' * 70)
+
+    out_path = OUT_DIR / 'growth_dynamics_deep_analysis.txt'
+    out_path.write_text('\n'.join(lines))
+    print('  ✓ growth_dynamics_deep_analysis.txt')
+
+    return results
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 #  MAIN
 # ══════════════════════════════════════════════════════════════════════════════
 def main():
@@ -633,7 +996,9 @@ def main():
     print(f"Output: {OUT_DIR}")
     print("=" * 70)
 
+    # Run deep analysis (appended, non-intrusive)
+    run_deep_analysis(comp, norm, inc, rgr, gomp)
+
 
 if __name__ == "__main__":
     main()
-

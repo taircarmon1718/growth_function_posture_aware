@@ -1,0 +1,234 @@
+======================================================================
+LARVAL QUALITY SCIENTIFIC ANALYSIS REPORT
+======================================================================
+Generated: 2026-03-22 11:24:17
+Dataset: predictions_all_larvae.xlsx
+Total larvae: 11011
+======================================================================
+
+======================================================================
+PART 1: LARVAL QUALITY INDEX (LQI)
+======================================================================
+
+DEFINITION:
+----------------------------------------
+LQI = 0.4 × P(valid) + 0.4 × P(posture) + 0.2 × morphology_score
+
+Where:
+  • P(valid): Model confidence that larva is real (not artifact)
+  • P(posture): Model confidence that posture is correct (T-like)
+  • morphology_score: Normalized shape quality metrics
+
+BIOLOGICAL INTERPRETATION:
+----------------------------------------
+LQI Range | Quality Level | Biological Meaning
+----------|---------------|--------------------
+0.90-1.00 | Excellent     | High-confidence measurements, suitable for all analyses
+0.75-0.90 | Good          | Reliable for population statistics
+0.60-0.75 | Fair          | Usable with caution, may introduce noise
+0.00-0.60 | Poor          | Likely artifacts or severely distorted
+
+DATASET QUALITY DISTRIBUTION:
+----------------------------------------
+  Excellent (≥0.90):     0 (  0.0%)
+  Good (0.75-0.90):    476 (  4.3%)
+  Fair (0.60-0.75):      0 (  0.0%)
+  Poor (<0.60):      10535 ( 95.7%)
+  Total:             11011
+
+RECOMMENDATIONS:
+----------------------------------------
+⚠ Dataset quality is MODERATE (<50% high-quality larvae)
+  → Strong LQI filtering recommended for growth analysis
+  → Consider improving image acquisition or segmentation
+
+======================================================================
+PART 2: POPULATION FILTERING ANALYSIS
+======================================================================
+
+FILTERING SCENARIOS COMPARED:
+----------------------------------------
+  A) Raw dataset (all detected larvae)
+  B) Valid larvae only (model-filtered)
+  C) Valid + correct posture
+  D) High LQI subsets (top 10%, 5%, 1%)
+
+IMPACT ON MEAN BODY LENGTH:
+----------------------------------------
+  A_Raw               : 8.1749 mm (+0.0000, +0.0%), 95% CI width: 0.4820 mm, n=11011
+  B_Valid             : 6.1066 mm (-2.0683, -25.3%), 95% CI width: 0.3933 mm, n=562
+  C_ValidPosture      : 5.9304 mm (-2.2445, -27.5%), 95% CI width: 0.4240 mm, n=476
+  D_LQI_top10pct      : 8.1749 mm (+0.0000, +0.0%), 95% CI width: 0.4891 mm, n=11011
+  D_LQI_top5pct       : 6.1066 mm (-2.0683, -25.3%), 95% CI width: 0.3835 mm, n=562
+  D_LQI_top1pct       : 5.9304 mm (-2.2445, -27.5%), 95% CI width: 0.4170 mm, n=476
+
+KEY FINDINGS:
+----------------------------------------
+  • Valid filtering reduces SD by 81.9%
+  • Valid+Posture filtering reduces SD by 82.2%
+  → STRONG noise reduction achieved through quality filtering
+
+  • CI width improvement: 12.0%
+  → Precision gains are modest
+
+======================================================================
+PART 3: POSTURE BIAS IN LENGTH MEASUREMENT
+======================================================================
+
+HYPOTHESIS:
+----------------------------------------
+Distorted larval posture (curved, bent) systematically biases body length
+measurements compared to correct T-like posture.
+
+SAMPLE SIZES:
+----------------------------------------
+  Correct posture (T-like):  n = 476
+  Distorted posture (curved): n = 86
+
+MEASUREMENTS:
+----------------------------------------
+  Mean length (correct posture):   5.9304 mm
+  Mean length (distorted posture): 7.0818 mm
+  Measurement bias:                -1.1514 mm (-16.3%)
+  95% CI for bias:                 [-1.6770, -0.6262] mm
+
+EFFECT SIZE:
+----------------------------------------
+  Cohen's d = -0.500
+  Interpretation: MEDIUM effect size
+
+STATISTICAL TESTS:
+----------------------------------------
+  Mann-Whitney U test:  U = 14614.0, p = 0.0000
+  Independent t-test:   t = -4.267, p = 0.0000
+
+  Result: HIGHLY SIGNIFICANT (p < 0.001)
+
+BIOLOGICAL INTERPRETATION:
+----------------------------------------
+⚠ UNEXPECTED BIAS DIRECTION:
+  Distorted posture larvae measure longer (unexpected).
+  Possible explanations:
+  • Measurement artifact
+  • Posture classification error
+  • Selection bias
+
+============================================================
+LABEL EFFICIENCY — NOTE ON PSEUDO-LABELS
+============================================================
+WARNING: Using pseudo-labels. Results represent an upper bound.
+
+BASELINE-ONLY LABEL EFFICIENCY — predicted_valid
+ No leakage-safe features available. Baseline CSV/figures saved.
+
+BASELINE-ONLY LABEL EFFICIENCY — predicted_posture
+ No leakage-safe features available. Baseline CSV/figures saved.
+
+======================================================================
+PART 5: POPULATION GROWTH ANALYSIS
+======================================================================
+
+OBJECTIVE:
+----------------------------------------
+Compare growth trajectories between raw and filtered populations
+to assess impact of quality filtering on biological growth estimates.
+
+POPULATIONS ANALYZED:
+----------------------------------------
+  raw            : Total n=11011, Avg per date=1101.1
+  valid          : Total n=  562, Avg per date= 56.2
+  high_quality   : Total n=  476, Avg per date= 47.6
+
+GROWTH TRAJECTORY COMPARISON:
+----------------------------------------
+  raw            : 9.044 → 8.353 mm (Δ=-0.692 mm, -7.6%)
+  valid          : 3.458 → 7.759 mm (Δ=+4.301 mm, +124.4%)
+  high_quality   : 3.473 → 7.588 mm (Δ=+4.115 mm, +118.5%)
+
+======================================================================
+PART 6: GOMPERTZ GROWTH MODEL FIT
+======================================================================
+
+MODEL:
+----------------------------------------
+L(t) = L_∞ * exp(-exp(-k * (t - t₀)))
+
+Where:
+  L_∞: Asymptotic length (maximum size)
+  k:   Growth rate parameter
+  t₀:  Inflection point
+
+FITTED PARAMETERS:
+----------------------------------------
+  raw            : L_∞=19.774, k=0.010, t₀=-10.00, R²=-0.0967, RMSE=1.4335
+  valid          : L_∞=9.544, k=0.206, t₀=0.70, R²=0.9205, RMSE=0.4710
+  high_quality   : L_∞=9.603, k=0.203, t₀=0.75, R²=0.9314, RMSE=0.4354
+
+MODEL COMPARISON:
+----------------------------------------
+  Raw R²: -0.0967
+  High-quality R²: 0.9314
+  Improvement: +1.0281
+
+  ✓ Filtering IMPROVES Gompertz fit (ΔR² > 0.05)
+    → Quality filtering reveals cleaner growth trajectory
+
+======================================================================
+PART 7: DAILY POPULATION STRUCTURE
+======================================================================
+
+OBJECTIVE:
+----------------------------------------
+Detect cohort structure within daily populations using KDE peak detection.
+
+RESULTS:
+----------------------------------------
+  Dates with multiple peaks: 1/10
+
+  Dates with potential cohorts:
+    27.10: 2 peaks, sep=2.03 mm
+
+  ⚠️  MULTIPLE COHORTS DETECTED
+    → Population may contain larvae from multiple hatching events
+    → Consider cohort-specific growth analysis
+
+======================================================================
+PART 8: LENGTH MODEL LABEL EFFICIENCY
+======================================================================
+
+OBJECTIVE:
+----------------------------------------
+Estimate minimum labeled samples needed for body length regression.
+
+MODEL: RandomForestRegressor
+
+RESULTS:
+----------------------------------------
+    5% (  22 samples): MAE=1.399, RMSE=1.799, R²=0.277
+   10% (  44 samples): MAE=1.300, RMSE=1.753, R²=0.312
+   20% (  89 samples): MAE=1.141, RMSE=1.645, R²=0.397
+   30% ( 134 samples): MAE=1.220, RMSE=1.695, R²=0.358
+   50% ( 224 samples): MAE=1.105, RMSE=1.628, R²=0.409
+   70% ( 314 samples): MAE=1.141, RMSE=1.652, R²=0.392
+  100% ( 449 samples): MAE=1.112, RMSE=1.638, R²=0.403
+
+======================================================================
+PART 9: POSTURE BIAS ON GROWTH PARAMETERS
+======================================================================
+
+OBJECTIVE:
+----------------------------------------
+Quantify impact of posture filtering on Gompertz growth parameters.
+
+GROWTH PARAMETERS:
+----------------------------------------
+  All valid larvae:      L_∞=9.544, k=0.206
+  Correct posture only:  L_∞=9.603, k=0.203
+
+PARAMETER DIFFERENCES:
+----------------------------------------
+  ΔL_∞ = +0.059 mm (+0.6%)
+  Δk   = -0.003 (-1.4%)
+
+  ○ Minimal posture bias (<5% on L_∞, <10% on k)
+    → Growth parameter estimates are robust to posture filtering

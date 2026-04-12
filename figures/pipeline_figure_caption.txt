@@ -1,0 +1,1 @@
+(A) Raw RGB image. (B) Processed binary mask. (C) Candidate detections. (D) shows a larva retained after hierarchical machine learning filtering (valid + posture). (E) Binary mask of the selected larva. (F) Morphometric extraction (PCA length).

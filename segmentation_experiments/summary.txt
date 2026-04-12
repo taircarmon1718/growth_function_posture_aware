@@ -1,0 +1,37 @@
+Segmentation Experiments Summary
+Output directory: /Users/taircarmon/Desktop/growth_function_posture_aware/segmentation_experiments
+
+Total images processed (baseline): 550
+Total components detected (circularity analysis): 667
+Components analyzed for combined features: 667
+
+Circularity mean: 0.827
+Circularity median: 0.734
+
+Area median: 1147.0 px²
+Elongation mean: 1.51
+
+Component example files (23):
+  - component_examples_largest_5pct.png
+  - component_examples_most_circular.png
+  - component_examples_rejected_high_area.png
+  - component_examples_smallest_5pct.png
+  - largest_5pct_sample_01.png
+  - largest_5pct_sample_02.png
+  - largest_5pct_sample_03.png
+  - most_circular_sample_01.png
+  - most_circular_sample_02.png
+  - most_circular_sample_03.png
+  - rejected_high_area_sample_01.png
+  - rejected_high_area_sample_02.png
+  - rejected_high_area_sample_03.png
+  - rejected_high_area_sample_04.png
+  - rejected_high_area_sample_05.png
+  - rejected_high_area_sample_06.png
+  - rejected_high_area_sample_07.png
+  - rejected_high_area_sample_08.png
+  - rejected_high_area_sample_09.png
+  - rejected_high_area_sample_10.png
+  - smallest_5pct_sample_01.png
+  - smallest_5pct_sample_02.png
+  - smallest_5pct_sample_03.png

@@ -14,15 +14,15 @@ print("=" * 60)
 try:
     # Import main
     from skeleton_length_figure import main
-
+    
     print("\n✓ Imports successful")
     print("\nRunning main()...\n")
-
+    
     # Run main
     main()
-
+    
     print("\n✓ Script completed successfully")
-
+    
 except Exception as e:
     print(f"\n✗ Error: {e}")
     import traceback

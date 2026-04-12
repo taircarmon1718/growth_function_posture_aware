@@ -1,0 +1,45 @@
+STDOUT:
+
+======================================================================
+GROWTH TRAJECTORY DYNAMICS ANALYSIS
+======================================================================
+Predictions : /Users/taircarmon/Desktop/growth_function_posture_aware/dual_larva_models/predictions/predictions_all_larvae.xlsx
+Output      : /Users/taircarmon/Desktop/growth_function_posture_aware/manual_comparison
+======================================================================
+
+Loading comparison data...
+  Loaded 10 unique developmental time points.
+
+SECTION 1 — Offset-normalised trajectory...
+
+  [1] Normalised trajectory: r=0.9177, MAE=0.7071 mm, RMSE=0.8613 mm
+  ✓ fig9_normalized_growth.png
+
+SECTION 2 — Day-to-day growth increments...
+
+  [2] Growth increments: r=0.0556, MAE=0.3840 mm/day, RMSE=0.4951 mm/day
+  ✓ fig10_growth_increments.png
+
+SECTION 3 — Relative Growth Rate (RGR)...
+
+  [3] Relative Growth Rate: r=0.0613, MAE=0.0934 day⁻¹
+  ✓ fig11_relative_growth_rate.png
+
+SECTION 4 — Gompertz growth model fit...
+
+  [4] Fitting Gompertz model ...
+  Manual    : A=19.004  k=0.0631  B=2.700   95% CI:  A=[12.05,103.10]  k=[0.0299,0.0932]  B=[2.348,4.247]
+  Automated : A=8.875  k=0.1833  B=1.206   95% CI:  A=[8.05,10.42]  k=[0.1207,0.2547]  B=[1.064,1.426]
+  ✓ fig12_gompertz_fit.png
+
+Saving summary...
+  ✓ growth_dynamics_summary.txt
+
+======================================================================
+GROWTH TRAJECTORY DYNAMICS ANALYSIS COMPLETE
+Output: /Users/taircarmon/Desktop/growth_function_posture_aware/manual_comparison
+======================================================================
+
+STDERR:
+
+RC: 0

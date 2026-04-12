@@ -1,0 +1,55 @@
+================================================================================
+STATISTICAL ANALYSIS: CONSISTENCY AND NOISE CHARACTERISTICS
+================================================================================
+Analysis Date: 2026-03-04 11:18:02
+Data Source: /Users/taircarmon/Desktop/growth_function_posture_aware/dual_larva_models_geodesic/predictions/predictions_all_larvae.xlsx
+
+DATA SUMMARY
+----------------------------------------
+Total larvae analyzed: 1938
+Posture-filtered larvae: 160
+Filtering efficiency: 8.3%
+Date range: 19.10 to 3.11
+Number of time points: 10
+
+VARIABILITY ANALYSIS
+----------------------------------------
+Within-day variability:
+  Raw data CV (mean): 128.52%
+  Filtered data CV (mean): 66.44%
+  CV reduction: 48.3%
+  Range reduction: 82.3%
+
+Between-day variability:
+  Raw growth signal CV: nan%
+  Filtered growth signal CV: nan%
+  Growth signal improvement: nan%
+
+TEMPORAL STABILITY ANALYSIS
+----------------------------------------
+
+NOISE CHARACTERISTICS
+----------------------------------------
+Signal-to-noise analysis:
+  Mean SNR: 1.51
+  Mean SNR (dB): 3.6
+  SNR range: 1.51 - 1.51
+
+Noise distribution:
+  Residual mean: -0.0000
+  Residual std: 5.2622
+  Skewness: 0.749
+  Kurtosis: -0.659
+  Normal distribution: No (p=0.0000)
+
+STATISTICAL SIGNIFICANCE TESTS
+----------------------------------------
+
+SUMMARY AND CONCLUSIONS
+----------------------------------------
+• Posture filtering substantially reduces measurement variability (48.3% CV reduction)
+• Low signal-to-noise ratio may affect measurement precision (SNR = 1.5)
+
+================================================================================
+End of Report
+================================================================================

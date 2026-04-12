@@ -1,0 +1,37 @@
+======================================================================
+TREND STATISTICS
+======================================================================
+
+OVERALL TREND (all dates)
+----------------------------------------
+Spearman correlation (mean):   ρ = 0.9152, p = 0.0002
+Spearman correlation (median): ρ = 0.9394, p = 0.0001
+Linear regression (mean):      slope = 0.5320, R² = 0.8851
+Linear regression (median):    slope = 0.5100, R² = 0.8663
+✓ Significant positive trend detected (p < 0.05)
+
+OVERALL CHANGE (first to last date)
+----------------------------------------
+First date (19.10): mean = 3.586, median = 3.483
+Last date (3.11):  mean = 7.436, median = 7.151
+Mean change:   +3.850 mm (+107.4%)
+Median change: +3.668 mm (+105.3%)
+
+LAST STEP CHANGE (penultimate to last date)
+----------------------------------------
+Penultimate date (31.10): mean = 7.826, median = 7.485
+Last date (3.11):        mean = 7.436, median = 7.151
+Mean change:   -0.390 mm
+Median change: -0.335 mm
+⚠ MEAN DROPPED on last date!
+⚠ MEDIAN DROPPED on last date!
+
+INTERPRETATION
+----------------------------------------
+Despite overall positive growth trend, the last date shows a DROP.
+This suggests:
+  • Sampling artifact (small sample size?)
+  • Cohort composition shift (more small larvae sampled?)
+  • True biological decline (unlikely without biological explanation)
+  • Outlier effect (presence of unusually small larvae?)
+

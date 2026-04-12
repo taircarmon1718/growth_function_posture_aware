@@ -38,10 +38,14 @@ from sklearn.linear_model import LinearRegression
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from scipy.optimize import curve_fit
+
+# Year to use when constructing datetimes for day.month strings (must be same for both origins)
+YEAR_FOR_DATES = 2023
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 ROOT       = Path(__file__).parent.parent.resolve()
-PREDS_FILE = ROOT / "dual_larva_models_geodesic" / "predictions" / "predictions_all_larvae.xlsx"
+PREDS_FILE = ROOT / "dual_larva_models_geodesic2" / "predictions" / "predictions_all_larvae.xlsx"
 OUT_DIR    = Path(__file__).parent.resolve()
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -224,6 +228,8 @@ def build_comparison(auto_df: pd.DataFrame) -> pd.DataFrame:
             "bias_median_mm":  auto_median  - man_mean,
             "bias_trimmed_mm": auto_trimmed - man_mean,
             "rel_error_pct":   abs(auto_mean - man_mean) / man_mean * 100,
+            # ratio to check calibration (automated / manual)
+            "auto_over_manual": float(auto_mean / man_mean) if man_mean != 0 else float('nan'),
         })
 
     comp = pd.DataFrame(rows).sort_values("dev_day").reset_index(drop=True)
@@ -235,50 +241,50 @@ def build_comparison(auto_df: pd.DataFrame) -> pd.DataFrame:
     return comp
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  STEP 2 — AGREEMENT METRICS  (core + CCC + nRMSE)
-# ══════════════════════════════════════════════════════════════════════════════
-def compute_metrics(comp: pd.DataFrame) -> dict:
-    m = comp["manual_mean_mm"].values
-    a = comp["auto_mean_mm"].values
-    diff = a - m
+def apply_scale_normalization(comp: pd.DataFrame) -> pd.DataFrame:
+    m = comp["manual_mean_mm"].astype(float).values
+    a = comp["auto_mean_mm"].astype(float).values
 
-    mae   = float(np.mean(np.abs(diff)))
-    rmse  = float(np.sqrt(np.mean(diff**2)))
-    bias  = float(np.mean(diff))
-    mape  = float(np.mean(np.abs(diff) / m) * 100)
-    nrmse = rmse / (m.max() - m.min()) * 100
+    denom = float(np.sum(m ** 2))
+    alpha = float(np.sum(m * a) / denom) if denom > 0 else 1.0
 
-    r_p, p_p = pearsonr(m, a)
-    r_s, p_s = spearmanr(m, a)
-    ccc       = _ccc(m, a)
+    comp = comp.copy()
+    comp["auto_normalized_mm"] = comp["auto_mean_mm"] / alpha
+    comp["normalized_bias_mm"] = comp["auto_normalized_mm"] - comp["manual_mean_mm"]
 
-    reg = _reg_stats(m, a)
-
-    metrics = dict(
-        n=len(comp),
-        MAE=mae, RMSE=rmse, nRMSE_pct=nrmse,
-        MeanBias=bias, MAPE_pct=mape,
-        Pearson_r=float(r_p), Pearson_p=float(p_p),
-        Spearman_rho=float(r_s), Spearman_p=float(p_s),
-        CCC=ccc,
-        **{f"reg_{k}": v for k, v in reg.items()},
+    manual = comp["manual_mean_mm"].astype(float).values
+    eps = 1e-12
+    comp["normalized_error_pct"] = (
+        np.abs(comp["auto_normalized_mm"].values - manual) / (manual + eps) * 100.0
     )
 
-    print("\n── Core Agreement Metrics ────────────────────────────────────")
-    for k, v in metrics.items():
-        if isinstance(v, tuple):
-            print(f"  {k:<30s}: ({v[0]:.4f}, {v[1]:.4f})")
-        elif isinstance(v, float):
-            print(f"  {k:<30s}: {v:.4f}")
-        else:
-            print(f"  {k:<30s}: {v}")
-    return metrics
+    print("\n=== SCALE NORMALIZATION ===")
+    print(f"Scale factor (alpha): {alpha:.4f}")
+    print("The correction was applied using a multiplicative scaling factor estimated from regression between automated and manual measurements.")
+
+    cols = [
+        "dev_day",
+        "manual_mean_mm",
+        "auto_mean_mm",
+        "auto_normalized_mm",
+        "normalized_bias_mm",
+        "normalized_error_pct",
+    ]
+
+    print("\n=== SCALE-CORRECTED COMPARISON TABLE ===")
+    pd.set_option("display.float_format", "{:.3f}".format)
+    pd.set_option("display.max_columns", 25)
+    pd.set_option("display.width", 160)
+    print(comp[cols].to_string(index=False))
+
+    (OUT_DIR / "normalized_comparison_table.csv").write_text(
+        comp[cols].to_csv(index=False)
+    )
+    print("  ✓ normalized_comparison_table.csv")
+
+    return comp
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  STEP 2b — CENTRAL TENDENCY ROBUSTNESS
-# ══════════════════════════════════════════════════════════════════════════════
 def central_tendency_comparison(comp: pd.DataFrame) -> dict:
     m = comp["manual_mean_mm"].values
     estimators = {
@@ -301,6 +307,78 @@ def central_tendency_comparison(comp: pd.DataFrame) -> dict:
     print(f"\n  ✦ Best estimator by MAE: {best_name} (MAE = {best_mae:.4f} mm)")
     results["best_estimator"] = best_name
     return results
+
+
+def compute_metrics(comp: pd.DataFrame) -> dict:
+    """Compute core agreement and regression metrics used throughout the script.
+
+    Returns a dict with keys expected by plotting and reporting functions.
+    """
+    m = comp["manual_mean_mm"].astype(float).values
+    a = comp["auto_mean_mm"].astype(float).values
+    n = len(m)
+
+    diff = a - m
+    MAE = float(np.mean(np.abs(diff)))
+    RMSE = float(np.sqrt(np.mean(diff ** 2)))
+    MeanBias = float(np.mean(diff))
+    eps = 1e-12
+    MAPE_pct = float(np.mean(np.abs(diff) / (m + eps)) * 100.0)
+    nRMSE_pct = float(RMSE / (m.max() - m.min()) * 100.0) if (m.max() - m.min()) != 0 else 0.0
+
+    # Correlations
+    try:
+        Pearson_r, Pearson_p = pearsonr(m, a)
+    except Exception:
+        Pearson_r, Pearson_p = np.nan, np.nan
+    try:
+        Spearman_rho, Spearman_p = spearmanr(m, a)
+    except Exception:
+        Spearman_rho, Spearman_p = np.nan, np.nan
+
+    # Concordance
+    try:
+        CCC = float(_ccc(m, a))
+    except Exception:
+        CCC = np.nan
+
+    # Regression stats (manual -> automated)
+    reg = _reg_stats(m, a)
+
+    metrics = dict(
+        n=int(n),
+        MAE=MAE,
+        RMSE=RMSE,
+        nRMSE_pct=nRMSE_pct,
+        MeanBias=MeanBias,
+        MAPE_pct=MAPE_pct,
+        Pearson_r=float(Pearson_r),
+        Pearson_p=float(Pearson_p),
+        Spearman_rho=float(Spearman_rho),
+        Spearman_p=float(Spearman_p),
+        CCC=float(CCC),
+
+        reg_slope=float(reg['slope']),
+        reg_intercept=float(reg['intercept']),
+        reg_se_slope=float(reg['se_slope']),
+        reg_se_int=float(reg['se_int']),
+        reg_ci_slope=reg['ci_slope'],
+        reg_ci_int=reg['ci_int'],
+        reg_p_slope1=float(reg['p_slope1']),
+        reg_p_int0=float(reg['p_int0']),
+        reg_R2=float(reg['R2']),
+    )
+
+    print("\n── Core Agreement Metrics ─────────────────────────────────────")
+    print(f"  n = {metrics['n']}")
+    print(f"  MAE = {metrics['MAE']:.4f} mm   RMSE = {metrics['RMSE']:.4f} mm   Mean bias = {metrics['MeanBias']:+.4f} mm")
+    print(f"  Normalised RMSE = {metrics['nRMSE_pct']:.2f}%   MAPE = {metrics['MAPE_pct']:.2f}%")
+    print(f"  Pearson r = {metrics['Pearson_r']:.4f} (p = {metrics['Pearson_p']:.4f})")
+    print(f"  Spearman rho = {metrics['Spearman_rho']:.4f} (p = {metrics['Spearman_p']:.4f})")
+    print(f"  Lin's CCC = {metrics['CCC']:.4f}")
+    print(f"  Regression: slope = {metrics['reg_slope']:.4f}  intercept = {metrics['reg_intercept']:.4f}  R2 = {metrics['reg_R2']:.4f}")
+
+    return metrics
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -614,170 +692,447 @@ def make_figures(comp: pd.DataFrame, metrics: dict, tests: dict,
     fig.savefig(OUT_DIR / "fig8_bootstrap_ci.png", dpi=200, bbox_inches="tight")
     plt.close(); print("  ✓ fig8_bootstrap_ci.png")
 
+    # ── Fig 9: Line plot comparing Manual, Automated, and Calibrated Automated ──
+    try:
+        sl = float(metrics.get('reg_slope', np.nan))
+        ic = float(metrics.get('reg_intercept', np.nan))
+    except Exception:
+        sl = np.nan
+        ic = np.nan
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  STEP 5 — SAVE ALL OUTPUTS
-# ══════════════════════════════════════════════════════════════════════════════
+    # Original automated mean and sd (already available)
+    auto_mean = a_mean
+    auto_sd = a_sd
+
+    # Calibrated automated measurements: invert regression (automated -> manual)
+    if np.isfinite(sl) and abs(sl) > 1e-8:
+        auto_cal_mean = (auto_mean - ic) / sl
+        # propagate SD by dividing by slope (intercept does not affect SD)
+        # ensure arrays
+        auto_cal_mean = np.array(auto_cal_mean, dtype=float)
+        auto_cal_sd = np.array(auto_sd, dtype=float) / float(sl)
+    else:
+        # fallback to original if slope invalid
+        auto_cal_mean = np.array(auto_mean, dtype=float)
+        auto_cal_sd = np.array(auto_sd, dtype=float)
+
+    fig, ax = plt.subplots(figsize=(9, 4.8))
+    # Manual: solid blue with circular markers
+    ax.errorbar(days, m_mean, yerr=m_sd, fmt='o-', color='#1A5276',
+                capsize=4, lw=1.8, ms=6, label='Manual (microscope)', zorder=4)
+    # Automated original: dashed red with square markers
+    ax.errorbar(days, auto_mean, yerr=auto_sd, fmt='s--', color='#C0392B',
+                capsize=4, lw=1.8, ms=6, label='Automated (image analysis)', zorder=3)
+    # Automated calibrated: dotted green with triangle markers
+    ax.errorbar(days, auto_cal_mean, yerr=auto_cal_sd, fmt='^:', color='#17A589',
+                capsize=4, lw=1.8, ms=6, label='Automated (calibrated)', zorder=5)
+
+    ax.set_xlabel('Developmental Day')
+    ax.set_ylabel('Body Length (mm)')
+    ax.set_title('Body Length over Developmental Time:\nEffect of Calibration on Automated Measurements')
+    ax.set_xticks(days)
+    ax.set_xticklabels(day_lbl, fontsize=8, rotation=30, ha='right')
+    ax.legend(frameon=False)
+    # grid only on y-axis, light dashed
+    ax.grid(axis='y', ls=':', alpha=0.5)
+    # remove top/right spines (consistent with rcParams)
+    try:
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+    except Exception:
+        pass
+    plt.tight_layout()
+    fig.savefig(OUT_DIR / 'fig1_line_manual_vs_auto_with_calibration.png', dpi=200, bbox_inches='tight')
+    plt.close()
+    print("  ✓ fig1_line_manual_vs_auto_with_calibration.png")
+
+    # end of make_figures
+
+
+def check_calibration(comp: pd.DataFrame) -> dict:
+    """Check calibration by computing automated/manual ratios per row.
+
+    Saves ratios to OUT_DIR/calibration_ratios.csv and prints a short summary.
+    Returns a dict with summary stats.
+    """
+    comp = comp.copy()
+    if "auto_over_manual" not in comp.columns:
+        comp["auto_over_manual"] = comp["auto_mean_mm"] / comp["manual_mean_mm"].replace({0: np.nan})
+    ratios = comp["auto_over_manual"].astype(float).values
+    # Basic stats
+    mean_r = float(np.nanmean(ratios))
+    med_r = float(np.nanmedian(ratios))
+    std_r = float(np.nanstd(ratios, ddof=1)) if len(ratios) > 1 else 0.0
+    min_r = float(np.nanmin(ratios))
+    max_r = float(np.nanmax(ratios))
+
+    # flag days with >5% and >10% calibration deviation
+    dev_pct = np.abs(ratios - 1.0) * 100.0
+    n_gt5 = int(np.sum(dev_pct > 5.0))
+    n_gt10 = int(np.sum(dev_pct > 10.0))
+
+    summary = {
+        "mean_ratio": mean_r,
+        "median_ratio": med_r,
+        "std_ratio": std_r,
+        "min_ratio": min_r,
+        "max_ratio": max_r,
+        "n_points": int(len(ratios)),
+        "n_gt5pct": n_gt5,
+        "n_gt10pct": n_gt10,
+    }
+
+    print("\n── Calibration check (automated / manual ratios) ───────────────")
+    print(f"  n points         : {summary['n_points']}")
+    print(f"  mean ratio       : {mean_r:.4f}  median: {med_r:.4f}  std: {std_r:.4f}")
+    print(f"  range            : [{min_r:.4f}, {max_r:.4f}]")
+    print(f"  n days >5% dev   : {n_gt5}   n days >10% dev: {n_gt10}")
+
+    # Save detailed table with ratio and percent deviation
+    out = comp.copy()
+    out['auto_over_manual'] = ratios
+    out['calib_dev_pct'] = np.abs(out['auto_over_manual'] - 1.0) * 100.0
+    out.to_csv(OUT_DIR / 'calibration_ratios.csv', index=False)
+    print(f"  ✓ calibration_ratios.csv saved ({OUT_DIR / 'calibration_ratios.csv'})")
+
+    return summary
+
+
 def save_outputs(comp: pd.DataFrame, metrics: dict, tests: dict,
                  ct: dict, het: dict, boot: dict, outlier: dict):
+    """Save comparison table, metrics summary, and LaTeX section.
 
+    Keeps filenames unchanged from previous pipeline.
+    """
     comp.round(4).to_csv(OUT_DIR / "comparison_table.csv", index=False)
     print("  ✓ comparison_table.csv")
 
-    # ── metrics_summary.txt ───────────────────────────────────────────────
-    sl = metrics["reg_slope"]; ic = metrics["reg_intercept"]
+    # metrics_summary.txt
+    sl = metrics.get("reg_slope", np.nan)
+    ic = metrics.get("reg_intercept", np.nan)
     lines = [
         "=" * 70,
         "AGREEMENT METRICS  v2  (developmental-day alignment)",
         "=" * 70,
-        f"  n data points              : {metrics['n']}",
-        f"  MAE                        : {metrics['MAE']:.4f} mm",
-        f"  RMSE                       : {metrics['RMSE']:.4f} mm",
-        f"  Normalised RMSE            : {metrics['nRMSE_pct']:.2f} %",
-        f"  Mean Bias (Auto−Manual)    : {metrics['MeanBias']:+.4f} mm",
-        f"  MAPE                       : {metrics['MAPE_pct']:.2f} %",
-        f"  Pearson r                  : {metrics['Pearson_r']:.4f}  (p = {metrics['Pearson_p']:.4f})",
-        f"  Spearman rho               : {metrics['Spearman_rho']:.4f}  (p = {metrics['Spearman_p']:.4f})",
-        f"  Lin's CCC                  : {metrics['CCC']:.4f}",
-        f"  Regression slope           : {sl:.4f}  95% CI [{metrics['reg_ci_slope'][0]:.4f}, {metrics['reg_ci_slope'][1]:.4f}]",
-        f"    H₀: slope = 1            : p = {metrics['reg_p_slope1']:.4f}",
-        f"  Regression intercept       : {ic:.4f}  95% CI [{metrics['reg_ci_int'][0]:.4f}, {metrics['reg_ci_int'][1]:.4f}]",
-        f"    H₀: intercept = 0        : p = {metrics['reg_p_int0']:.4f}",
-        f"  R²                         : {metrics['reg_R2']:.4f}",
+        f"  n data points              : {metrics.get('n', 'NA')}",
+        f"  MAE                        : {metrics.get('MAE', float('nan')):.4f} mm",
+        f"  RMSE                       : {metrics.get('RMSE', float('nan')):.4f} mm",
+        f"  Normalised RMSE            : {metrics.get('nRMSE_pct', float('nan')):.2f} %",
+        f"  Mean Bias (Auto−Manual)    : {metrics.get('MeanBias', float('nan')):+.4f} mm",
+        f"  MAPE                       : {metrics.get('MAPE_pct', float('nan')):.2f} %",
+        f"  Pearson r                  : {metrics.get('Pearson_r', float('nan')):.4f}  (p = {metrics.get('Pearson_p', float('nan')):.4f})",
+        f"  Spearman rho               : {metrics.get('Spearman_rho', float('nan')):.4f}  (p = {metrics.get('Spearman_p', float('nan')):.4f})",
+        f"  Lin's CCC                  : {metrics.get('CCC', float('nan')):.4f}",
+        f"  Regression slope           : {sl:.4f}  95% CI [{metrics.get('reg_ci_slope', (float('nan'), float('nan')))[0]:.4f}, {metrics.get('reg_ci_slope', (float('nan'), float('nan')))[1]:.4f}]",
+        f"    H₀: slope = 1            : p = {metrics.get('reg_p_slope1', float('nan')):.4f}",
+        f"  Regression intercept       : {ic:.4f}  95% CI [{metrics.get('reg_ci_int', (float('nan'), float('nan')))[0]:.4f}, {metrics.get('reg_ci_int', (float('nan'), float('nan')))[1]:.4f}]",
+        f"    H₀: intercept = 0        : p = {metrics.get('reg_p_int0', float('nan')):.4f}",
+        f"  R²                         : {metrics.get('reg_R2', float('nan')):.4f}",
         "",
         "─" * 70,
         "CENTRAL TENDENCY ROBUSTNESS",
         "─" * 70,
     ]
     for name, r in ct.items():
-        if name == "best_estimator":
+        if name == 'best_estimator':
             continue
-        lines.append(f"  {name:<16} MAE={r['MAE']:.4f}  RMSE={r['RMSE']:.4f}  "
-                     f"Bias={r['Bias']:+.4f}  MAPE={r['MAPE']:.2f}%  nRMSE={r['nRMSE_pct']:.2f}%")
-    lines.append(f"  → Best estimator by MAE: {ct['best_estimator']}")
+        lines.append(f"  {name:<16} MAE={r['MAE']:.4f}  RMSE={r['RMSE']:.4f}  Bias={r['Bias']:+.4f}  MAPE={r['MAPE']:.2f}%  nRMSE={r['nRMSE_pct']:.2f}%")
+    lines.append(f"  → Best estimator by MAE: {ct.get('best_estimator', 'NA')}")
+
     lines += [
         "",
         "─" * 70,
         "HETEROSCEDASTICITY & PROPORTIONAL BIAS",
         "─" * 70,
-        f"  |diff| vs mean length      : rho = {het['r_het']:.4f},  p = {het['p_het']:.4f}"
-        f"  → {'proportional error present' if het['proportional_error'] else 'no proportional error'}",
-        f"  diff  vs mean length       : rho = {het['r_prop']:.4f}, p = {het['p_prop']:.4f}"
-        f"  → {'proportional bias present' if het['proportional_bias'] else 'no proportional bias'}",
+        f"  |diff| vs mean length      : rho = {het.get('r_het', float('nan')):.4f},  p = {het.get('p_het', float('nan')):.4f}",
+        f"  diff  vs mean length       : rho = {het.get('r_prop', float('nan')):.4f}, p = {het.get('p_prop', float('nan')):.4f}",
         "",
         "─" * 70,
         f"BOOTSTRAP CIs  (n = {N_BOOTSTRAP} resamples)",
         "─" * 70,
-        f"  MAE   95% CI               : [{boot['MAE_ci'][0]:.4f}, {boot['MAE_ci'][1]:.4f}] mm",
-        f"  Bias  95% CI               : [{boot['Bias_ci'][0]:.4f}, {boot['Bias_ci'][1]:.4f}] mm",
-        f"  Slope 95% CI               : [{boot['Slope_ci'][0]:.4f}, {boot['Slope_ci'][1]:.4f}]",
+        f"  MAE   95% CI               : [{boot.get('MAE_ci', (float('nan'), float('nan')))[0]:.4f}, {boot.get('MAE_ci', (float('nan'), float('nan')))[1]:.4f}] mm",
+        f"  Bias  95% CI               : [{boot.get('Bias_ci', (float('nan'), float('nan')))[0]:.4f}, {boot.get('Bias_ci', (float('nan'), float('nan')))[1]:.4f}] mm",
+        f"  Slope 95% CI               : [{boot.get('Slope_ci', (float('nan'), float('nan')))[0]:.4f}, {boot.get('Slope_ci', (float('nan'), float('nan')))[1]:.4f}]",
         "",
         "─" * 70,
         "OUTLIER SENSITIVITY  (top-5% extreme diffs removed)",
         "─" * 70,
-        f"  n removed                  : {outlier['n_removed']}  (|diff| > {outlier['threshold']:.3f} mm)",
-        f"  MAE   full / trimmed       : {outlier['full']['MAE']:.4f} / {outlier['trimmed']['MAE']:.4f} mm",
-        f"  RMSE  full / trimmed       : {outlier['full']['RMSE']:.4f} / {outlier['trimmed']['RMSE']:.4f} mm",
-        f"  Bias  full / trimmed       : {outlier['full']['Bias']:+.4f} / {outlier['trimmed']['Bias']:+.4f} mm",
+        f"  n removed                  : {outlier.get('n_removed', 0)}  (|diff| > {outlier.get('threshold', float('nan')):.3f} mm)",
+        f"  MAE   full / trimmed       : {outlier.get('full', {}).get('MAE', float('nan')):.4f} / {outlier.get('trimmed', {}).get('MAE', float('nan')):.4f} mm",
+        f"  RMSE  full / trimmed       : {outlier.get('full', {}).get('RMSE', float('nan')):.4f} / {outlier.get('trimmed', {}).get('RMSE', float('nan')):.4f} mm",
+        f"  Bias  full / trimmed       : {outlier.get('full', {}).get('Bias', float('nan')):+.4f} / {outlier.get('trimmed', {}).get('Bias', float('nan')):+.4f} mm",
         "",
         "─" * 70,
         "STATISTICAL TESTS",
         "─" * 70,
-        f"  Shapiro–Wilk p-value       : {tests['Shapiro_p']:.4f}  → "
-        f"{'normal' if tests['Normal'] else 'non-normal'} differences",
-        f"  Paired t-test              : t = {tests['PairedT_t']:.3f},  p = {tests['PairedT_p']:.4f}",
-        f"  Wilcoxon signed-rank       : W = {tests['Wilcoxon_W']:.1f},  p = {tests['Wilcoxon_p']:.4f}",
+        f"  Shapiro–Wilk p-value       : {tests.get('Shapiro_p', float('nan')):.4f}  → {'normal' if tests.get('Normal', False) else 'non-normal'} differences",
+        f"  Paired t-test              : t = {tests.get('PairedT_t', float('nan')):.3f},  p = {tests.get('PairedT_p', float('nan')):.4f}",
+        f"  Wilcoxon signed-rank       : W = {tests.get('Wilcoxon_W', float('nan')):.1f},  p = {tests.get('Wilcoxon_p', float('nan')):.4f}",
         "",
         "BLAND–ALTMAN",
-        f"  Mean bias                  : {tests['BA_MeanBias']:+.4f} mm",
-        f"  SD of differences          : {tests['BA_SD']:.4f} mm",
-        f"  95% LoA lower              : {tests['BA_LoA_Lo']:.4f} mm",
-        f"  95% LoA upper              : {tests['BA_LoA_Hi']:.4f} mm",
+        f"  Mean bias                  : {tests.get('BA_MeanBias', float('nan')):+.4f} mm",
+        f"  SD of differences          : {tests.get('BA_SD', float('nan')):.4f} mm",
+        f"  95% LoA lower              : {tests.get('BA_LoA_Lo', float('nan')):.4f} mm",
+        f"  95% LoA upper              : {tests.get('BA_LoA_Hi', float('nan')):.4f} mm",
         "=" * 70,
     ]
+
     (OUT_DIR / "metrics_summary.txt").write_text("\n".join(lines))
     print("  ✓ metrics_summary.txt")
 
-    # ── LaTeX ─────────────────────────────────────────────────────────────
-    bias_dir = "overestimation" if metrics["MeanBias"] > 0 else "underestimation"
-    sig_t    = "statistically significant" if tests["PairedT_p"] < 0.05 else "not statistically significant"
-    prop_bias_txt = ("Spearman correlation between the mean of both methods and the "
-                     f"difference was $\\rho = {het['r_prop']:.3f}$ ($p = {het['p_prop']:.4f}$), "
-                     + ("indicating the presence of proportional bias."
-                        if het["proportional_bias"]
-                        else "providing no evidence of proportional bias."))
-    het_txt = (f"Correlation between absolute error and mean body length was "
-               f"$\\rho = {het['r_het']:.3f}$ ($p = {het['p_het']:.4f}$), "
-               + ("suggesting heteroscedastic error structure."
-                  if het["proportional_error"]
-                  else "indicating homoscedastic error."))
-    sl = metrics["reg_slope"]; ic = metrics["reg_intercept"]
-
+    # Minimal LaTeX section
+    sl = metrics.get('reg_slope', float('nan'))
+    ic = metrics.get('reg_intercept', float('nan'))
     latex = rf"""
 \subsection{{Comparison with Manual Microscope-Based Measurements}}
 
-\subsubsection{{Agreement Between Automated and Manual Daily Means}}
+Regression slope = {sl:.3f}, intercept = {ic:.3f}.
 
-The automated image-analysis pipeline was evaluated against manual
-microscope-based body length measurements from the same biological culture
-cycle, aligned by developmental day index.
-Only larvae classified as valid detections with correct T-shaped posture
-were included ($n = {int(comp['n_auto'].sum()):,}$ larvae across
-{metrics['n']} developmental time points).
-
-Strong agreement was observed between the two measurement approaches.
-Pearson correlation was $r = {metrics['Pearson_r']:.3f}$
-($p = {metrics['Pearson_p']:.4f}$) and Lin's concordance correlation
-coefficient (CCC) was $\rho_c = {metrics['CCC']:.3f}$, indicating
-high simultaneous precision and accuracy.
-Spearman rank correlation was
-$\rho = {metrics['Spearman_rho']:.3f}$ ($p = {metrics['Spearman_p']:.4f}$).
-Ordinary least-squares regression yielded a slope of
-${sl:.3f}$ (95\%~CI: ${metrics['reg_ci_slope'][0]:.3f}$--${metrics['reg_ci_slope'][1]:.3f}$;
-$H_0\colon \beta_1=1$: $p = {metrics['reg_p_slope1']:.4f}$) and intercept of
-${ic:.3f}$~mm (95\%~CI: ${metrics['reg_ci_int'][0]:.3f}$--${metrics['reg_ci_int'][1]:.3f}$;
-$H_0\colon \beta_0=0$: $p = {metrics['reg_p_int0']:.4f}$), with $R^2 = {metrics['reg_R2']:.3f}$.
-
-\subsubsection{{Bias and Error Analysis (MAE, RMSE, Relative Error)}}
-
-The mean absolute error (MAE) was ${metrics['MAE']:.3f}$~mm
-(bootstrap 95\%~CI: ${boot['MAE_ci'][0]:.3f}$--${boot['MAE_ci'][1]:.3f}$~mm)
-and the root mean square error (RMSE) was ${metrics['RMSE']:.3f}$~mm
-(normalised RMSE = ${metrics['nRMSE_pct']:.1f}$\%).
-The mean bias was ${metrics['MeanBias']:+.3f}$~mm
-(bootstrap 95\%~CI: ${boot['Bias_ci'][0]:.3f}$--${boot['Bias_ci'][1]:.3f}$~mm),
-indicating systematic {bias_dir}.
-The MAPE was ${metrics['MAPE_pct']:.1f}$\%.
-
-Bland--Altman analysis revealed a mean bias of
-${tests['BA_MeanBias']:+.3f}$~mm (SD~$= {tests['BA_SD']:.3f}$~mm),
-with 95\% limits of agreement from
-${tests['BA_LoA_Lo']:.3f}$~mm to ${tests['BA_LoA_Hi']:.3f}$~mm.
-{prop_bias_txt}
-{het_txt}
-
-A paired $t$-test indicated that the systematic bias was {sig_t}
-($t = {tests['PairedT_t']:.3f}$, $p = {tests['PairedT_p']:.4f}$);
-the Wilcoxon signed-rank test confirmed this finding
-($W = {tests['Wilcoxon_W']:.1f}$, $p = {tests['Wilcoxon_p']:.4f}$).
-
-Robustness of central tendency estimation was assessed by comparing the mean,
-median, and 10\%-trimmed mean as automated estimators.
-The {ct['best_estimator'].lower()} yielded the lowest MAE
-(${ct[ct['best_estimator']]['MAE']:.3f}$~mm), suggesting it as the preferred
-estimator for growth-tracking applications.
-Sensitivity analysis excluding the 5\% most extreme pairwise differences
-({outlier['n_removed']} data point(s)) resulted in a MAE of
-${outlier['trimmed']['MAE']:.3f}$~mm (vs. ${outlier['full']['MAE']:.3f}$~mm full),
-indicating that the agreement metrics are robust to extreme observations.
 """
     (OUT_DIR / "latex_section.tex").write_text(latex.strip())
     print("  ✓ latex_section.tex")
 
+    return None
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  MAIN
-# ══════════════════════════════════════════════════════════════════════════════
+
+def _gompertz_model(t, A, k, t0):
+    """Gompertz model in the form requested:
+    L(t) = A * exp(-exp(-k * (t - t0)))
+    """
+    t = np.asarray(t, dtype=float)
+    return A * np.exp(-np.exp(-k * (t - t0)))
+
+
+def _weighted_auto_by_day(auto_df: pd.DataFrame) -> pd.DataFrame:
+    """Compute weighted mean per developmental day using pipeline weighting.
+       Uses dev_day present in auto_df (already set by load_auto_data).
+       weight = 0.7 * valid_confidence + 0.3 * posture_confidence
+       If posture_confidence is NaN, use valid_confidence only.
+       Returns DataFrame with columns: dev_day, t (dev_day), mean_mm, sd_mm, n
+    """
+    df = auto_df.copy()
+    def row_weight(r):
+        v = float(r.get('valid_confidence', 0.0))
+        p = r.get('posture_confidence', np.nan)
+        if pd.notna(p):
+            return 0.7 * v + 0.3 * float(p)
+        return v
+    df['__w__'] = df.apply(row_weight, axis=1).astype(float)
+
+    rows = []
+    for d, g in df.groupby('dev_day'):
+        if pd.isna(d):
+            continue
+        w = g['__w__'].values.astype(float)
+        L = g['body_length_mm'].astype(float).values
+        sum_w = float(w.sum())
+        if sum_w > 0:
+            mean_w = float((w * L).sum() / sum_w)
+            if len(L) > 1:
+                var_w = float(((w * (L - mean_w) ** 2).sum()) / sum_w)
+                sd_w = float(np.sqrt(max(var_w, 0.0)))
+            else:
+                sd_w = 0.0
+        else:
+            mean_w = float(L.mean())
+            sd_w = float(L.std(ddof=0)) if len(L) > 1 else 0.0
+        rows.append({'dev_day': int(d), 't': int(d), 'mean_mm': mean_w, 'sd_mm': sd_w, 'n': len(L)})
+    out = pd.DataFrame(rows).sort_values('dev_day').reset_index(drop=True)
+    return out
+
+
+def _fit_gompertz(t: np.ndarray, L: np.ndarray):
+    """Fit gompertz model and return popt and diagnostics (R2, RMSE).
+    Uses robust initial guesses and bounds.
+    """
+    t = np.asarray(t, dtype=float)
+    L = np.asarray(L, dtype=float)
+    if len(t) < 3 or np.all(np.isnan(L)):
+        return None
+
+    # initial guesses
+    A0 = float(np.nanmax(L) * 1.05) if np.nanmax(L) > 0 else 1.0
+    k0 = 0.3
+    t0_0 = float(np.median(t))
+    p0 = [A0, k0, t0_0]
+    bounds = ([0.0, 1e-6, t.min() - 5.0], [A0 * 10.0 if A0>0 else 100.0, 5.0, t.max() + 5.0])
+    try:
+        popt, pcov = curve_fit(_gompertz_model, t, L, p0=p0, bounds=bounds, maxfev=20000)
+    except Exception:
+        # try without bounds
+        try:
+            popt, pcov = curve_fit(_gompertz_model, t, L, p0=p0, maxfev=20000)
+        except Exception:
+            return None
+    # predictions and metrics
+    L_hat = _gompertz_model(t, *popt)
+    ss_res = np.sum((L - L_hat) ** 2)
+    ss_tot = np.sum((L - np.nanmean(L)) ** 2)
+    R2 = 1.0 - (ss_res / ss_tot) if ss_tot > 0 else float('nan')
+    RMSE = float(np.sqrt(np.mean((L - L_hat) ** 2)))
+    return dict(popt=popt, pcov=pcov, R2=R2, RMSE=RMSE, L_hat=L_hat)
+
+
+def run_gompertz_comparison(auto_df: pd.DataFrame, comp: pd.DataFrame):
+    """Perform the full Gompertz comparison analysis and save outputs.
+    Saves figure to outputs/figures/gompertz_comparison_publication.png and parameters to
+    outputs/tables/gompertz_parameters.csv and a short Results text.
+    """
+    # prepare output dirs
+    out_fig_dir = OUT_DIR / 'outputs' / 'figures'
+    out_tab_dir = OUT_DIR / 'outputs' / 'tables'
+    out_fig_dir.mkdir(parents=True, exist_ok=True)
+    out_tab_dir.mkdir(parents=True, exist_ok=True)
+
+    # Step 1: prepare time and means
+    auto_w = _weighted_auto_by_day(auto_df)
+
+    # Manual: use dev_day from comp directly as the time axis (simplified)
+    manual_df = comp[['dev_day', 'manual_mean_mm', 'manual_sd_mm']].copy()
+    manual_df = manual_df.rename(columns={'manual_mean_mm': 'mean_mm', 'manual_sd_mm': 'sd_mm'})
+    manual_df['dev_day'] = manual_df['dev_day'].astype(int)
+    manual_df['t'] = manual_df['dev_day'].astype(int)
+
+    # Step 2: align by dev_day and fit Gompertz to each
+    # Ensure both datasets use the same developmental days (intersection)
+    days_auto = set(auto_w['dev_day'].astype(int).tolist()) if not auto_w.empty else set()
+    days_man = set(manual_df['dev_day'].astype(int).tolist()) if not manual_df.empty else set()
+    common_days = sorted(list(days_auto.intersection(days_man)))
+    if len(common_days) == 0:
+        print('  ⚠ No overlapping developmental days between automated and manual datasets — skipping Gompertz fit.')
+        return dict(params=pd.DataFrame(rows), mad=float('nan'), fig='')
+
+    auto_w = auto_w[auto_w['dev_day'].isin(common_days)].sort_values('dev_day').reset_index(drop=True)
+    manual_df = manual_df[manual_df['dev_day'].isin(common_days)].sort_values('dev_day').reset_index(drop=True)
+
+    t_auto = auto_w['dev_day'].values.astype(float)
+    y_auto = auto_w['mean_mm'].values.astype(float)
+    t_man = manual_df['dev_day'].values.astype(float)
+    y_man = manual_df['mean_mm'].values.astype(float)
+
+    # use specified p0 and bounds per instructions
+    def _fit_gompertz_fixed(t, L):
+        if len(t) < 3:
+            return None
+        p0 = [10.0, 0.5, 5.0]
+        bounds = (0, [20.0, 5.0, 20.0])
+        try:
+            popt, pcov = curve_fit(_gompertz_model, t, L, p0=p0, bounds=bounds, maxfev=20000)
+        except Exception:
+            try:
+                popt, pcov = curve_fit(_gompertz_model, t, L, p0=p0, maxfev=20000)
+            except Exception:
+                return None
+        L_hat = _gompertz_model(t, *popt)
+        ss_res = np.sum((L - L_hat) ** 2)
+        ss_tot = np.sum((L - np.nanmean(L)) ** 2)
+        R2 = 1.0 - (ss_res / ss_tot) if ss_tot > 0 else float('nan')
+        RMSE = float(np.sqrt(np.mean((L - L_hat) ** 2)))
+        return dict(popt=popt, pcov=pcov, R2=R2, RMSE=RMSE, L_hat=L_hat)
+
+    res_auto = _fit_gompertz_fixed(t_auto, y_auto) if len(t_auto)>0 else None
+    res_man  = _fit_gompertz_fixed(t_man, y_man) if len(t_man)>0 else None
+
+    # Prepare parameters table
+    rows = []
+    def _row_from_res(source, res):
+        if res is None:
+            return dict(source=source, A=float('nan'), k=float('nan'), t0=float('nan'), R2=float('nan'), RMSE=float('nan'))
+        popt = res['popt']
+        return dict(source=source, A=float(popt[0]), k=float(popt[1]), t0=float(popt[2]), R2=float(res['R2']), RMSE=float(res['RMSE']))
+
+    rows.append(_row_from_res('automated', res_auto))
+    rows.append(_row_from_res('manual', res_man))
+    params_df = pd.DataFrame(rows)
+    params_df.to_csv(out_tab_dir / 'gompertz_parameters.csv', index=False)
+
+    # Step 3: curve similarity and metrics
+    t_min = min(np.nanmin(t_auto) if len(t_auto)>0 else np.nan, np.nanmin(t_man) if len(t_man)>0 else np.nan)
+    t_max = max(np.nanmax(t_auto) if len(t_auto)>0 else np.nan, np.nanmax(t_man) if len(t_man)>0 else np.nan)
+    if np.isnan(t_min) or np.isnan(t_max):
+        t_fine = np.linspace(1, 16, 200)
+    else:
+        # keep fine grid within integer dev_day bounds
+        t_fine = np.linspace(max(1, t_min), t_max, 200)
+
+    if res_auto is not None:
+        y_auto_f = _gompertz_model(t_fine, *res_auto['popt'])
+    else:
+        y_auto_f = np.full_like(t_fine, np.nan)
+    if res_man is not None:
+        y_man_f = _gompertz_model(t_fine, *res_man['popt'])
+    else:
+        y_man_f = np.full_like(t_fine, np.nan)
+
+    mad = float(np.nanmean(np.abs(y_auto_f - y_man_f)))
+
+    # Step 4: Publication-quality visualization
+    fig, ax = plt.subplots(figsize=(8.5, 5.5))
+    # white background
+    fig.patch.set_facecolor('white')
+    ax.set_facecolor('white')
+
+    # scatter points
+    if len(t_auto)>0:
+        ax.scatter(t_auto, y_auto, color='#1A5276', marker='o', s=40, label='Automated measurements')
+    if len(t_man)>0:
+        ax.scatter(t_man, y_man, color='#C0392B', marker='s', s=40, label='Manual microscope measurements')
+
+    # fitted curves (solid)
+    if res_auto is not None:
+        ax.plot(t_fine, y_auto_f, color='#1A5276', lw=2.5, label='Gompertz fit (automated)')
+    if res_man is not None:
+        ax.plot(t_fine, y_man_f, color='#C0392B', lw=2.5, label='Gompertz fit (manual)')
+
+    ax.set_xlabel('Developmental Day', fontsize=12)
+    ax.set_ylabel('Body length (mm)', fontsize=12)
+    ax.set_title('Gompertz model comparison — Automated vs Manual', fontsize=13)
+    ax.grid(color='#E5E5E5', linestyle='-', linewidth=0.8)
+    ax.legend(frameon=False, fontsize=10)
+    plt.tight_layout()
+    fig_path = out_fig_dir / 'gompertz_comparison_publication.png'
+    fig.savefig(fig_path, dpi=300, bbox_inches='tight')
+    plt.close()
+
+    # Step 5: Save textual results for manuscript
+    txt_lines = []
+    txt_lines.append('Gompertz model comparison — automated vs manual')
+    txt_lines.append('')
+    if res_auto is not None:
+        pa = res_auto['popt']
+        txt_lines.append(f'Automated fit: A={pa[0]:.3f} mm, k={pa[1]:.4f} day^-1, t0={pa[2]:.3f} days; R2={res_auto["R2"]:.3f}, RMSE={res_auto["RMSE"]:.3f} mm')
+    else:
+        txt_lines.append('Automated fit: failed')
+    if res_man is not None:
+        pm = res_man['popt']
+        txt_lines.append(f'Manual fit   : A={pm[0]:.3f} mm, k={pm[1]:.4f} day^-1, t0={pm[2]:.3f} days; R2={res_man["R2"]:.3f}, RMSE={res_man["RMSE"]:.3f} mm')
+    else:
+        txt_lines.append('Manual fit: failed')
+
+    txt_lines.append('')
+    txt_lines.append(f'Curve similarity (mean absolute diff) = {mad:.3f} mm')
+    txt_lines.append('')
+    # Scientific interpretation
+    if res_auto is not None and res_man is not None:
+        txt_lines.append('Results:')
+        txt_lines.append(f' The Gompertz model fit quality: automated R² = {res_auto["R2"]:.3f}; manual R² = {res_man["R2"]:.3f}.')
+        txt_lines.append(f' Asymptotic size (A): automated = {pa[0]:.2f} mm; manual = {pm[0]:.2f} mm.')
+        txt_lines.append(f' Growth rate (k): automated = {pa[1]:.4f} day⁻¹; manual = {pm[1]:.4f} day⁻¹.')
+        txt_lines.append(f' Inflection time (t0): automated = {pa[2]:.2f} days; manual = {pm[2]:.2f} days.')
+        txt_lines.append(' Interpretation: compare k and t0 to assess whether the automated pipeline preserves the temporal dynamics of growth; MAD gives curve-level deviation independent of scale.')
+    else:
+        txt_lines.append('Insufficient fits to provide full comparison.')
+
+    (out_tab_dir / 'gompertz_results.txt').write_text('\n'.join(txt_lines))
+
+    print(f'  ✓ {fig_path.name}')
+    print(f'  ✓ gompertz_parameters.csv')
+    print(f'  ✓ gompertz_results.txt')
+
+    return dict(params=params_df, mad=mad, fig=str(fig_path))
+
+
+# Insert call to run_gompertz_comparison inside main (after save_outputs)
 def main():
     print("\n" + "=" * 70)
     print("MANUAL vs. AUTOMATED — Publication-Level Method Agreement Analysis v2")
@@ -791,6 +1146,9 @@ def main():
 
     print("\nSTEP 1 — Building comparison table (mean + median + trimmed mean)...")
     comp = build_comparison(auto_df)
+
+    print("\nSTEP 1b — Calibration check (automated / manual)…")
+    calib_summary = check_calibration(comp)
 
     print("\nSTEP 2 — Core agreement metrics (MAE, RMSE, nRMSE, CCC, regression)...")
     metrics = compute_metrics(comp)
@@ -818,6 +1176,12 @@ def main():
 
     print("\nSTEP 5 — Saving all outputs...")
     save_outputs(comp, metrics, tests, ct, het, boot, outlier)
+
+    print("\nSTEP 6 — Gompertz model comparison (auto vs manual)...")
+    try:
+        _ = run_gompertz_comparison(auto_df, comp)
+    except Exception as e:
+        print(f"  ⚠ Gompertz comparison failed: {e}")
 
     print("\n" + "=" * 70)
     print("DONE — all outputs saved to:")

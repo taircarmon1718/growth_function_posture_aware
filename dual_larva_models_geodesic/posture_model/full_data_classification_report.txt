@@ -1,0 +1,15 @@
+Model     : GradientBoosting
+Criterion : weighted F1
+CV mean weighted F1 : 0.6645 ± 0.0123
+CV mean accuracy         : 0.6985 ± 0.0165
+Training samples (after upsample): 527
+
+Classification report on FULL dataset (after retrain):
+                 precision    recall  f1-score   support
+
+    Bad Posture       0.87      0.74      0.80       125
+Correct Posture       0.90      0.96      0.93       326
+
+       accuracy                           0.90       451
+      macro avg       0.89      0.85      0.86       451
+   weighted avg       0.89      0.90      0.89       451

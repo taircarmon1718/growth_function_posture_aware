@@ -1,353 +1,385 @@
 #!/usr/bin/env python3
 """
-pipeline_flow_diagram.py
-========================
-Two-row publication-quality pipeline diagram for run_pipeline.py.
-
-Row 1 (stages 1-5):  Pre-Processing  →  Segmentation
-Row 2 (stages 6-10): Filtering  →  Detection Overlay  →  Per-Larva Report
-
-Every panel shows the FULL petri-dish image at that pipeline stage.
-Stages 1-9 are computed live from the raw source JPG.
-Stage 10 is the saved per-larva 3-panel crop report.
-
-Fixes applied:
-  - Gray connector line routes along the RIGHT margin (avoids caption text)
-  - Stage number (1-10) shown in bottom-left corner of every caption area
-
-Output: figures/pipeline_flow_diagram.png
+pipeline_flow_diagram.py - Publication-quality pipeline figures
 """
-
 from pathlib import Path
 import cv2
 import numpy as np
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
+import pandas as pd
 
-# ── Paths ──────────────────────────────────────────────────────────────────────
-SCRIPT_DIR   = Path(__file__).parent.resolve()
+SCRIPT_DIR = Path(__file__).parent.resolve()
 PROJECT_ROOT = SCRIPT_DIR.parent
 
-RAW_IMAGE    = PROJECT_ROOT / "31.10" / "images" / "IMG_7376.JPG"
-SAMPLE_BASE  = PROJECT_ROOT / "analysis_full" / "31.10" / "IMG_7376"
-LARVA_REPORT = SAMPLE_BASE / "larvae_reports" / "larva_012.png"
-LARVA_MASK   = SAMPLE_BASE / "segmentation_mask.png"
+RAW_IMAGE = PROJECT_ROOT / "31.10" / "images" / "IMG_7376.JPG"
+SAMPLE_BASE = PROJECT_ROOT / "analysis_full" / "31.10" / "IMG_7376"
+LARVA_MASK = SAMPLE_BASE / "segmentation_mask.png"
 LARVA_OVERLAY = SAMPLE_BASE / "overlay.png"
-OUTPUT_FILE  = SCRIPT_DIR / "pipeline_flow_diagram.png"
 
-# ── Pipeline parameters (exact match to run_pipeline.py) ──────────────────────
 BLACKHAT_KERNEL_SIZE = 25
-BG_KERNEL_SIZE       = 50
-MORPH_OPEN_SIZE      = 3
-MIN_LARVA_AREA       = 80
+BG_KERNEL_SIZE = 50
+MORPH_OPEN_SIZE = 3
+MIN_LARVA_AREA = 80
 
-# ── Colours ────────────────────────────────────────────────────────────────────
 COL = {
-    "pre":     "#1A5276",   # teal-blue   – pre-processing
-    "seg":     "#1A237E",   # indigo      – segmentation
-    "filt":    "#4A235A",   # purple      – filtering
-    "morph":   "#1B5E20",   # dark green  – overlay
-    "out":     "#7B1A1A",   # dark red    – output
-    "bg":      "#FFFFFF",
-    "title":   "#1B2631",
-    "arrow":   "#444444",
-    "caption": "#1A1A1A",
+    "pre": "#1A5276", "seg": "#1A237E", "filt": "#4A235A",
+    "morph": "#1B5E20", "out": "#7B1A1A", "bg": "#FFFFFF",
+    "arrow": "#444444", "caption": "#1A1A1A",
 }
-FONT = "DejaVu Sans"
 
-# ── Stage metadata: (badge_label, caption_text, border_colour) ────────────────
-STAGE_META = [
-    # ── Row 1 ──────────────────────────────────────────────────────────────
-    ("1",  "Grayscale\nInput",                              COL["pre"]),
-    ("2",  "Background\nEstimation\n(MORPH_DILATE 50×50)", COL["pre"]),
-    ("3",  "Contrast Map\n(absdiff: bg − gray)",           COL["pre"]),
-    ("4",  "Blackhat\nTransform\n(MORPH_BLACKHAT 25×25)",  COL["seg"]),
-    ("5",  "Saliency Fusion\n+ Otsu Threshold\n(0.7×contrast + 0.3×blackhat)", COL["seg"]),
-    # ── Row 2 ──────────────────────────────────────────────────────────────
-    ("6",  "Morphological\nCleaning\n(MORPH_OPEN 3×3)",    COL["seg"]),
-    ("7",  "Connected\nComponents\n(8-connectivity, colour-coded)", COL["filt"]),
-    ("8",  "Final Larva\nMask\n(accepted components)",     COL["filt"]),
-    ("9",  "Detection\nOverlay\n(bounding boxes + IDs)",   COL["morph"]),
-    ("10", "Per-Larva\nReport\n(crop · mask · skeleton)",  COL["out"]),
-]
+STAGE_INFO_FIG1 = [("Grayscale image", COL["pre"]), ("Background estimation", COL["pre"]),
+                   ("Contrast enhancement", COL["pre"]), ("Black-hat filtering", COL["seg"]),
+                   ("Saliency thresholding", COL["seg"])]
 
-ROW_LABELS  = [
-    "STAGE 1–5  ·  Pre-Processing  →  Segmentation",
-    "STAGE 6–10  ·  Filtering  →  Detection Overlay  →  Per-Larva Report",
-]
-ROW_COLOURS = [COL["seg"], COL["filt"]]
+STAGE_INFO_FIG2 = [("Morphological cleaning", COL["seg"]),
+                   ("Connected components", COL["filt"]), ("Final larval mask", COL["filt"])]
 
 
-# ── Generate all intermediate images live from the raw source ─────────────────
+def _compute_pca_length(mask_binary: np.ndarray):
+    """Compute PCA major-axis length from binary mask."""
+    ys, xs = np.where(mask_binary > 0)
+    if len(xs) < 2:
+        return 0.0, (0, 0), (0, 0), (0, 0), np.array([1.0, 0.0])
+    pts = np.column_stack((xs.astype(float), ys.astype(float)))
+    centroid = pts.mean(axis=0)
+    pts_centered = pts - centroid
+    U, S, Vt = np.linalg.svd(pts_centered, full_matrices=False)
+    direction = Vt[0]
+    projections = pts_centered @ direction
+    pmin, pmax = projections.min(), projections.max()
+    ep1 = centroid + pmin * direction
+    ep2 = centroid + pmax * direction
+    length_px = float(pmax - pmin)
+    return length_px, (float(ep1[0]), float(ep1[1])), (float(ep2[0]), float(ep2[1])), (float(centroid[0]), float(centroid[1])), direction
+
+
+def _find_file_in_project(filename: str) -> Path | None:
+    matches = sorted(PROJECT_ROOT.rglob(filename))
+    return matches[0] if matches else None
+
+
+def _select_larva_from_later_date():
+    """Select a larva from a later date (after day 10) for better quality."""
+    CONF_THRESHOLD = 0.85
+    preds_path = PROJECT_ROOT / "dual_larva_models_geodesic2" / "predictions" / "predictions_all_larvae.xlsx"
+    preds = pd.read_excel(preds_path)
+
+    # Prefer later dates (31.10, 3.11, etc.) for better larva quality
+    # Map date to numeric value for sorting
+    date_order = {'19.10': 1, '20.10': 2, '21.10': 3, '24.10': 4, '25.10': 5,
+                  '26.10': 6, '27.10': 7, '29.10': 8, '31.10': 9, '3.11': 10}
+
+    sel = preds[(preds["predicted_valid"] == 1) & (preds["valid_confidence"] >= float(CONF_THRESHOLD))].copy()
+    if sel.shape[0] == 0:
+        raise RuntimeError(f"No larva satisfies filters")
+
+    # Extract date from image_name (e.g., "IMG_3778" -> look up in data or use later dates)
+    # Sort by date descending to prefer later dates
+    sel['date_numeric'] = sel['date'].apply(lambda d: date_order.get(str(d).replace('.0', '.').replace(',', '.'), 0))
+    sel = sel.sort_values(['date_numeric', 'image_name', 'larva_filename'], ascending=[False, True, True]).reset_index(drop=True)
+
+    row = sel.iloc[0]
+    larva_fname = str(row["larva_filename"]).strip()
+    image_name = str(row.get("image_name", "")).strip()
+
+    larva_report_path = _find_file_in_project(larva_fname)
+    if larva_report_path is None:
+        raise FileNotFoundError(f"Larva report file {larva_fname} not found")
+
+    sample_base = larva_report_path.parent.parent if (larva_report_path.parent.name == 'larvae_reports') else larva_report_path.parent
+
+    mask_path = sample_base / 'segmentation_mask.png'
+    overlay_path = sample_base / 'overlay.png'
+
+    if not mask_path.exists() or not overlay_path.exists():
+        raise FileNotFoundError(f"Missing mask or overlay in {sample_base}")
+
+    overlay_img = cv2.imread(str(overlay_path))
+    mask_full = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
+
+    if overlay_img is None or mask_full is None:
+        raise RuntimeError("Cannot read overlay or mask")
+
+    # Select best larva component by PCA length matching
+    num_labels2, labels2, stats2, _ = cv2.connectedComponentsWithStats((mask_full > 0).astype(np.uint8), connectivity=8)
+    px_pred = float(row.get('body_length_px', np.nan)) if pd.notna(row.get('body_length_px', np.nan)) else np.nan
+
+    best_label = 0
+    best_score = float('inf')
+    for lbl in range(1, num_labels2):
+        area = int(stats2[lbl, cv2.CC_STAT_AREA])
+        if area < MIN_LARVA_AREA or area > 50000:
+            continue
+        comp_mask = (labels2 == lbl).astype(np.uint8)
+        comp_len_px, _, _, _, _ = _compute_pca_length(comp_mask)
+        if np.isfinite(px_pred) and px_pred > 1.0:
+            score = abs(comp_len_px - px_pred) / px_pred
+        else:
+            score = -area
+        if score < best_score:
+            best_score = score
+            best_label = lbl
+
+    if best_label == 0:
+        best_area = 0
+        for lbl in range(1, num_labels2):
+            area = int(stats2[lbl, cv2.CC_STAT_AREA])
+            if area > best_area:
+                best_area = area
+                best_label = lbl
+
+    if best_label == 0:
+        raise RuntimeError("No suitable larva component found")
+
+    chosen_label = int(best_label)
+    larva_only = (labels2 == chosen_label).astype(np.uint8)
+    lbl_stats = stats2[chosen_label]
+    x, y, ww, hh = int(lbl_stats[cv2.CC_STAT_LEFT]), int(lbl_stats[cv2.CC_STAT_TOP]), int(lbl_stats[cv2.CC_STAT_WIDTH]), int(lbl_stats[cv2.CC_STAT_HEIGHT])
+
+    pad = int(max(20, 0.3 * max(ww, hh)))
+    y0 = max(0, y - pad)
+    y1 = min(mask_full.shape[0] - 1, y + hh + pad - 1)
+    x0 = max(0, x - pad)
+    x1 = min(mask_full.shape[1] - 1, x + ww + pad - 1)
+
+    # Try to find raw image
+    raw_img = None
+    if image_name:
+        raw_candidates = sorted(PROJECT_ROOT.rglob(f"*{image_name}*"))
+        if raw_candidates:
+            raw_img = cv2.imread(str(raw_candidates[0]))
+    if raw_img is None:
+        raw_img = overlay_img
+
+    larva_crop_bgr = raw_img[y0:y1+1, x0:x1+1].copy() if raw_img is not None else overlay_img[y0:y1+1, x0:x1+1].copy()
+    larva_crop_mask = larva_only[y0:y1+1, x0:x1+1].astype(np.uint8)
+
+    # Compute measurements
+    length_px, ep1, ep2, centroid, direction = _compute_pca_length(larva_crop_mask)
+    area_px = int(larva_crop_mask.sum())
+    px_pred_val = px_pred if np.isfinite(px_pred) else float('nan')
+    mm_pred = float(row.get('body_length_mm', np.nan)) if pd.notna(row.get('body_length_mm', np.nan)) else float('nan')
+    PIXEL_TO_MM = (mm_pred / px_pred_val) if (np.isfinite(px_pred_val) and px_pred_val > 1e-6 and np.isfinite(mm_pred)) else float('nan')
+    length_mm = length_px * PIXEL_TO_MM if np.isfinite(PIXEL_TO_MM) else float('nan')
+
+    return {
+        'larva_fname': larva_fname,
+        'overlay_img': overlay_img,
+        'larva_crop_bgr': larva_crop_bgr,
+        'larva_crop_mask': larva_crop_mask,
+        'length_px': length_px,
+        'length_mm': length_mm,
+        'area_px': area_px,
+        'ep1': ep1, 'ep2': ep2, 'centroid': centroid, 'direction': direction
+    }
+
+
 def generate_stages(raw_path: Path) -> list:
-    """
-    Re-runs the exact run_pipeline.py segmentation chain on raw_path.
-    Returns list of 10 (mode, numpy_array) tuples.
-    Full petri-dish view — uniform downscale only, no side crop.
-    """
+    """Generate preprocessing and segmentation stages."""
     img_bgr = cv2.imread(str(raw_path))
-    if img_bgr is None:
+    if img_bgr is None or img_bgr.size == 0:
         raise FileNotFoundError(f"Cannot open: {raw_path}")
 
-    # Uniform downscale to ≤1400 px wide – preserves full dish
     h, w = img_bgr.shape[:2]
-    max_w = 1400
-    if w > max_w:
-        scale   = max_w / w
-        img_bgr = cv2.resize(img_bgr, (max_w, int(h * scale)),
-                             interpolation=cv2.INTER_AREA)
+    if w > 1400:
+        scale = 1400 / w
+        img_bgr = cv2.resize(img_bgr, (1400, int(h * scale)), interpolation=cv2.INTER_AREA)
 
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+    s1 = gray.copy()
 
-    # 1 – grayscale
-    s1 = ("gray", gray.copy())
+    k_bg = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (BG_KERNEL_SIZE, BG_KERNEL_SIZE))
+    bg = cv2.morphologyEx(gray, cv2.MORPH_DILATE, k_bg)
+    s2 = bg.copy()
 
-    # 2 – background estimation (MORPH_DILATE)
-    k_bg = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,
-                                     (BG_KERNEL_SIZE, BG_KERNEL_SIZE))
-    bg   = cv2.morphologyEx(gray, cv2.MORPH_DILATE, k_bg)
-    s2   = ("gray", bg.copy())
+    diff = cv2.absdiff(bg, gray)
+    s3 = cv2.normalize(diff, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
 
-    # 3 – contrast map (absdiff), normalised for visibility
-    diff     = cv2.absdiff(bg, gray)
-    diff_vis = cv2.normalize(diff, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-    s3 = ("gray", diff_vis)
-
-    # 4 – blackhat transform, normalised for visibility
-    k_bh     = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,
-                                         (BLACKHAT_KERNEL_SIZE, BLACKHAT_KERNEL_SIZE))
+    k_bh = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (BLACKHAT_KERNEL_SIZE, BLACKHAT_KERNEL_SIZE))
     blackhat = cv2.morphologyEx(gray, cv2.MORPH_BLACKHAT, k_bh)
-    bh_vis   = cv2.normalize(blackhat, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-    s4 = ("gray", bh_vis)
+    s4 = cv2.normalize(blackhat, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
 
-    # 5 – saliency fusion + Otsu threshold
-    saliency  = cv2.addWeighted(diff, 0.7, blackhat, 0.3, 0)
-    _, thresh = cv2.threshold(saliency, 0, 255,
-                              cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    s5 = ("gray", thresh.copy())
+    saliency = cv2.addWeighted(diff, 0.7, blackhat, 0.3, 0)
+    _, thresh = cv2.threshold(saliency, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    s5 = thresh.copy()
 
-    # 6 – morphological cleaning (MORPH_OPEN)
-    k_mo    = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,
-                                        (MORPH_OPEN_SIZE, MORPH_OPEN_SIZE))
+    k_mo = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (MORPH_OPEN_SIZE, MORPH_OPEN_SIZE))
     cleaned = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, k_mo)
-    s6 = ("gray", cleaned.copy())
+    s6 = cleaned.copy()
 
-    # 7 – connected components, colour-coded
-    num_labels, labels_img, stats, _ = cv2.connectedComponentsWithStats(
-        cleaned, connectivity=8)
+    num_labels, labels_img, stats, _ = cv2.connectedComponentsWithStats(cleaned, connectivity=8)
     cc_img = np.zeros((*cleaned.shape, 3), dtype=np.uint8)
     rng = np.random.default_rng(42)
     for lbl in range(1, num_labels):
         if stats[lbl, cv2.CC_STAT_AREA] < MIN_LARVA_AREA:
             continue
         cc_img[labels_img == lbl] = rng.integers(60, 255, 3).tolist()
-    s7 = ("bgr", cc_img)
+    s7 = cc_img
 
-    # 8 – final larva mask (pre-computed full-image result)
     mask_img = cv2.imread(str(LARVA_MASK), cv2.IMREAD_GRAYSCALE)
-    s8 = ("gray", mask_img if mask_img is not None else cleaned)
+    if mask_img is None:
+        mask_img = cleaned
+    s8 = mask_img
 
-    # 9 – detection overlay (pre-computed full-image result)
-    overlay_img = cv2.imread(str(LARVA_OVERLAY))
-    s9 = ("bgr", overlay_img if overlay_img is not None else img_bgr)
-
-    # 10 – per-larva 3-panel crop report
-    report_img = cv2.imread(str(LARVA_REPORT))
-    s10 = ("bgr", report_img if report_img is not None else img_bgr)
-
-    return [s1, s2, s3, s4, s5, s6, s7, s8, s9, s10]
+    return [s1, s2, s3, s4, s5, s6, s7, s8]
 
 
-# ── Draw the two-row diagram ───────────────────────────────────────────────────
-def draw(stage_images: list):
-    assert len(stage_images) == 10, "Need exactly 10 stage images"
+def _place_horizontal_panels(imgs, captions, border_cols, out_file, img_w=4.2, img_h=4.2, pad_top=0.6, pad_bot=0.75):
+    """Place panels horizontally (no arrows)."""
+    N = len(imgs)
+    GAP_X = 0.28
+    PAD_L = 0.16
+    PAD_R = 0.16
+    CAP_H = 1.1
 
-    # ── Layout constants (all in inches) ──────────────────────────────────
-    N_COLS  = 5
-    IMG_W   = 2.90    # panel image width
-    IMG_H   = 2.10    # panel image height
-    CAP_H   = 0.66    # caption area below each image
-    GAP_X   = 0.10    # horizontal gap between panels
-    BAR_H   = 0.28    # section header bar height
-    ROW_GAP = 0.55    # gap between bottom of row-1 captions and row-2 bar
-    PAD_L   = 0.12
-    PAD_R   = 0.18    # slightly wider right margin for elbow connector
-    PAD_TOP = 0.50
-    PAD_BOT = 0.40
-
-    row_w = N_COLS * IMG_W + (N_COLS - 1) * GAP_X
+    row_w = N * img_w + (N - 1) * GAP_X
     fig_w = PAD_L + row_w + PAD_R
-    fig_h = (PAD_TOP
-             + BAR_H + IMG_H + CAP_H        # row 1
-             + ROW_GAP
-             + BAR_H + IMG_H + CAP_H        # row 2
-             + PAD_BOT)
+    fig_h = pad_top + img_h + CAP_H + pad_bot
 
-    fig = plt.figure(figsize=(fig_w, fig_h), facecolor=COL["bg"])
+    fig = plt.figure(figsize=(fig_w, fig_h), facecolor=COL['bg'])
 
     def fx(inch): return inch / fig_w
     def fy(inch): return inch / fig_h
 
-    # ── Main title ────────────────────────────────────────────────────────
+    axes = []
+    for i, (im, cap, bcol) in enumerate(zip(imgs, captions, border_cols)):
+        img_left = PAD_L + i * (img_w + GAP_X)
+        img_bottom = pad_bot
+        ax = fig.add_axes((fx(img_left), fy(img_bottom), fx(img_w), fy(img_h)))
 
-
-
-    # ── Place one panel ───────────────────────────────────────────────────
-    def place_panel(col_idx, row_idx, mode, img_data, step, caption, border_col):
-        # Distance from figure TOP to top of this row's section bar
-        row_top = (PAD_TOP
-                   + row_idx * (BAR_H + IMG_H + CAP_H + ROW_GAP))
-
-        # Section bar (drawn once per row, at col 0)
-        if col_idx == 0:
-            bar_ax = fig.add_axes([
-                fx(PAD_L),
-                fy(fig_h - row_top - BAR_H),
-                fx(row_w),
-                fy(BAR_H * 0.80),
-            ])
-            bar_ax.set_facecolor(ROW_COLOURS[row_idx])
-            bar_ax.axis("off")
-            bar_ax.text(0.5, 0.5, ROW_LABELS[row_idx],
-                        ha="center", va="center",
-                        fontsize=8.5, fontweight="bold", color="white",
-                        fontfamily=FONT, transform=bar_ax.transAxes)
-
-        # Image axes
-        img_left   = PAD_L + col_idx * (IMG_W + GAP_X)
-        img_bottom = fig_h - row_top - BAR_H - IMG_H
-        ax = fig.add_axes([fx(img_left), fy(img_bottom), fx(IMG_W), fy(IMG_H)])
-
-        if img_data is not None:
-            if mode == "gray":
-                ax.imshow(img_data, cmap="gray", aspect="auto",
-                          interpolation="lanczos", vmin=0, vmax=255)
+        if im is not None and im.size > 0:
+            if len(im.shape) == 2:
+                ax.imshow(im, cmap='gray', aspect='equal', interpolation='lanczos', vmin=0, vmax=255)
             else:
-                ax.imshow(cv2.cvtColor(img_data, cv2.COLOR_BGR2RGB),
-                          aspect="auto", interpolation="lanczos")
+                ax.imshow(cv2.cvtColor(im, cv2.COLOR_BGR2RGB), aspect='equal', interpolation='lanczos')
         else:
-            ax.set_facecolor("#EEEEEE")
+            ax.set_facecolor('#EEEEEE')
 
-        ax.set_xticks([]); ax.set_yticks([])
+        ax.set_xticks([])
+        ax.set_yticks([])
         for sp in ax.spines.values():
-            sp.set_edgecolor(border_col); sp.set_linewidth(2.8)
+            sp.set_edgecolor(bcol)
+            sp.set_linewidth(3.0)
 
-        # Stage number — small, clean — bottom-left inside the image frame
-        # Placed just above the bottom border, outside actual image pixels
-        ax.text(0.03, 0.03, step,
-                ha="left", va="bottom",
-                fontsize=9, fontweight="bold",
-                color="white", fontfamily=FONT,
-                transform=ax.transAxes,
-                bbox=dict(boxstyle="square,pad=0.15",
-                          facecolor=border_col, edgecolor="none", alpha=0.75),
-                zorder=5)
+        ax.text(0.03, 0.03, str(i + 1), ha='left', va='bottom', fontsize=10000, fontweight='bold',
+                color='white', transform=ax.transAxes, family='sans-serif',
+                bbox=dict(boxstyle='square,pad=0.18', facecolor=bcol, edgecolor='none', alpha=0.95))
 
-        # Caption text centred below panel
-        cap_cx = img_left + IMG_W / 2
-        cap_by = img_bottom - CAP_H + 0.05
-        fig.text(fx(cap_cx), fy(cap_by + CAP_H * 0.58),
-                 caption,
-                 ha="center", va="center",
-                 fontsize=7.0, color=COL["caption"],
-                 fontfamily=FONT, linespacing=1.4,
-                 multialignment="center")
+        axes.append(ax)
 
-        return ax
+    # Add captions
+    for i, (ax, cap) in enumerate(zip(axes, captions)):
+        bb = ax.get_position()
+        cap_cx = bb.x0 + bb.width / 2
+        cap_by = bb.y0 - CAP_H * 0.35
 
-    # ── Render all 10 panels ──────────────────────────────────────────────
-    panel_axes = []
-    for idx, ((mode, img_data), (step, caption, bcol)) in enumerate(
-            zip(stage_images, STAGE_META)):
-        row_idx = idx // N_COLS
-        col_idx = idx % N_COLS
-        ax = place_panel(col_idx, row_idx, mode, img_data,
-                         step, caption, bcol)
-        panel_axes.append((ax, row_idx, col_idx))
+        lines = cap.split()
+        if len(lines) >= 3 and len(cap) > 15:
+            mid = len(lines) // 2
+            cap_text = ' '.join(lines[:mid]) + '\n' + ' '.join(lines[mid:])
+        else:
+            cap_text = cap
 
-    # ── Horizontal arrows within each row ─────────────────────────────────
-    for i in range(len(panel_axes) - 1):
-        ax_l, r_l, _ = panel_axes[i]
-        ax_r, r_r, _ = panel_axes[i + 1]
-        if r_l != r_r:
-            continue                        # skip cross-row gap
-        bb_l = ax_l.get_position()
-        bb_r = ax_r.get_position()
-        ymid = (bb_l.y0 + bb_l.y1) / 2
-        fig.add_artist(
-            plt.annotate("",
-                         xy=(bb_r.x0, ymid), xytext=(bb_l.x1, ymid),
-                         xycoords="figure fraction",
-                         textcoords="figure fraction",
-                         arrowprops=dict(arrowstyle="-|>",
-                                         color=COL["arrow"],
-                                         lw=1.8, mutation_scale=13),
-                         zorder=10)
-        )
+        fig.text(cap_cx, cap_by, cap_text, ha='center', va='top', fontsize=10000,
+                color=COL['caption'], linespacing=1.3, multialignment='center',
+                family='sans-serif', fontweight='normal')
 
-    # ── Inter-row connector: just an arrowhead at panel 6 entry ─────────
-    bb2 = panel_axes[5][0].get_position()   # first panel row 2
-    y_r2_mid = (bb2.y0 + bb2.y1) / 2
-    lc = "#888888"
-
-    # Small arrowhead pointing into panel 6 from its left edge
-    fig.add_artist(
-        plt.annotate("",
-                     xy=(bb2.x0, y_r2_mid),
-                     xytext=(bb2.x0 + fx(0.06), y_r2_mid),
-                     xycoords="figure fraction",
-                     textcoords="figure fraction",
-                     arrowprops=dict(arrowstyle="-|>",
-                                     color=lc, lw=1.8, mutation_scale=12),
-                     zorder=6)
-    )
-
-    # ── Legend ────────────────────────────────────────────────────────────
-    patches = [
-        mpatches.Patch(facecolor=COL["pre"],   edgecolor="none", label="Pre-Processing"),
-        mpatches.Patch(facecolor=COL["seg"],   edgecolor="none", label="Segmentation"),
-        mpatches.Patch(facecolor=COL["filt"],  edgecolor="none", label="Filtering & Mask"),
-        mpatches.Patch(facecolor=COL["morph"], edgecolor="none", label="Detection Overlay"),
-        mpatches.Patch(facecolor=COL["out"],   edgecolor="none", label="Per-Larva Report"),
-    ]
-    fig.legend(handles=patches, loc="lower center",
-               bbox_to_anchor=(0.5, 0.005), ncol=5,
-               fontsize=7.5, framealpha=0.96,
-               edgecolor="#CCCCCC", handlelength=1.3,
-               title="Pipeline Stage  ·  Source: 31.10 / IMG_7376.JPG",
-               title_fontsize=7.0)
-
-    plt.savefig(str(OUTPUT_FILE), dpi=200, bbox_inches="tight",
-                facecolor=COL["bg"], edgecolor="none")
+    plt.savefig(str(out_file), dpi=300, bbox_inches='tight', facecolor=COL['bg'])
     plt.close()
-    print(f"  ✓  Saved: {OUTPUT_FILE}")
+    print(f"  ✓  Saved: {out_file}")
 
 
-# ── Entry point ────────────────────────────────────────────────────────────────
 def main():
-    print("\n" + "=" * 65)
-    print("PIPELINE FLOW DIAGRAM  —  2 rows × 5 panels, full petri dish")
-    print(f"Source : {RAW_IMAGE}")
-    print("=" * 65)
+    print("\n" + "=" * 70)
+    print("PIPELINE FLOW DIAGRAM - Publication-Quality Figures")
+    print("=" * 70)
 
     if not RAW_IMAGE.exists():
         print(f"❌  Raw image not found: {RAW_IMAGE}")
         return
 
-    print("  Generating pipeline stage images...")
-    stages = generate_stages(RAW_IMAGE)
-    print(f"  {len(stages)} stages ready.")
+    print("\n  Generating pipeline stage images...")
+    try:
+        stages = generate_stages(RAW_IMAGE)
+        print(f"  ✓ {len(stages)} stages ready.")
+    except Exception as e:
+        print(f"❌  Error: {e}")
+        return
 
-    print("  Rendering diagram...")
-    draw(stages)
+    print("\n  Rendering Figure 1: Preprocessing...")
+    try:
+        _place_horizontal_panels(stages[0:5],
+                                [c[0] for c in STAGE_INFO_FIG1],
+                                [c[1] for c in STAGE_INFO_FIG1],
+                                SCRIPT_DIR / 'pipeline_flow_diagram_figure1.png',
+                                img_w=4.2, img_h=4.2)
+    except Exception as e:
+        print(f"❌  Error: {e}")
 
-    print("=" * 65)
-    print(f"DONE  →  {OUTPUT_FILE}")
-    print("=" * 65)
+    print("\n  Rendering Figure 2: Segmentation...")
+    try:
+        _place_horizontal_panels(stages[5:8],
+                                [c[0] for c in STAGE_INFO_FIG2],
+                                [c[1] for c in STAGE_INFO_FIG2],
+                                SCRIPT_DIR / 'pipeline_flow_diagram_figure2.png',
+                                img_w=5.2, img_h=4.8)
+    except Exception as e:
+        print(f"❌  Error: {e}")
 
+    print("\n  Rendering Figure 3: Detection & Morphometrics (real larva from later date)...")
+    captions = [
+        "Detection (overlay)",
+        "Larva crop (later stage)",
+        "Binary mask with morphometric report",
+    ]
+    border_cols = [COL["filt"], COL["morph"], COL["morph"]]
+    overlay_panel, larva_crop_rgb, mask_panel = None, None, None
 
-if __name__ == "__main__":
-    main()
+    try:
+        data = _select_larva_from_later_date()
 
+        # Panel 1: Global detection overlay (full plate)
+        overlay_panel = cv2.cvtColor(data['overlay_img'], cv2.COLOR_BGR2RGB)
+
+        # Panel 2: Larva crop (zoom-in on the chosen larva)
+        larva_crop_rgb = cv2.cvtColor(data['larva_crop_bgr'], cv2.COLOR_BGR2RGB)
+
+        # Panel 3: Binary mask + morphometric text (clean, centered)
+        mask_h, mask_w = data['larva_crop_mask'].shape
+        mask_panel = np.zeros((mask_h, mask_w, 3), dtype=np.uint8)
+        mask_panel[data['larva_crop_mask'] > 0] = [255, 255, 255]
+
+        # Morphometric text (area + lengths) placed close to top of mask
+        text_lines = [
+            f"Area: {data['area_px']} px",
+            f"Length: {data['length_px']:.1f} px",
+        ]
+        if np.isfinite(data['length_mm']):
+            text_lines.append(f"Length: {data['length_mm']:.2f} mm")
+
+        y_text = 24
+        for t in text_lines:
+            cv2.putText(
+                mask_panel,
+                t,
+                (8, y_text),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (200, 100, 100),
+                2,
+                cv2.LINE_AA,
+            )
+            y_text += 26
+    except Exception as e:
+        print(f"❌  Error rendering Figure 3: {e}")
+
+    _place_horizontal_panels(
+        [overlay_panel, larva_crop_rgb, mask_panel],
+        captions,
+        border_cols,
+        SCRIPT_DIR / 'pipeline_flow_diagram_figure3.png',
+        img_w=5.2,
+        img_h=5.0,
+    )

@@ -1,0 +1,26 @@
+Best model : SVM
+Selection criterion : weighted F1
+CV strategy : StratifiedKFold(n_splits=5)
+
+RandomForest:
+  mean weighted F1 = 0.6400 ± 0.0321
+  mean accuracy         = 0.6874 ± 0.0439
+
+SVM:
+  mean weighted F1 = 0.6455 ± 0.0615
+  mean accuracy         = 0.6564 ± 0.0628
+
+GradientBoosting:
+  mean weighted F1 = 0.6450 ± 0.0521
+  mean accuracy         = 0.6896 ± 0.0578
+
+
+Full-data report (best model retrained on all data):
+                 precision    recall  f1-score   support
+
+    Bad Posture       0.74      0.97      0.84       125
+Correct Posture       0.99      0.87      0.93       326
+
+       accuracy                           0.90       451
+      macro avg       0.86      0.92      0.88       451
+   weighted avg       0.92      0.90      0.90       451

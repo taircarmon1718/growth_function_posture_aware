@@ -1,0 +1,90 @@
+NONLINEAR GROWTH MODELING REPORT
+========================================================================
+
+Predictions file: /Users/taircarmon/Desktop/growth_function_posture_aware/dual_larva_models_geodesic2/predictions/predictions_all_larvae.xlsx
+Number of developmental days: 10
+Day indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+Daily means (mm): [3.473, 3.541, 3.537, 5.594, 5.733, 6.236, 6.683, 7.923, 7.588, 7.615]
+
+MODEL COMPARISON
+----------------------------------------
+Gompertz model:
+  R^2   = 0.932
+  RMSE  = 0.433 mm
+  AIC   = -10.72
+  BIC   = -9.82
+
+Logistic model:
+  R^2   = 0.937
+  RMSE  = 0.417 mm
+  AIC   = -11.50
+  BIC   = -10.59
+
+Von_bertalanffy model:
+  R^2   = 0.930
+  RMSE  = 0.440 mm
+  AIC   = -10.44
+  BIC   = -9.53
+
+Linear model:
+  R^2   = 0.914
+  RMSE  = 0.489 mm
+  AIC   = -10.31
+  BIC   = -9.70
+
+Quadratic model:
+  R^2   = 0.928
+  RMSE  = 0.445 mm
+  AIC   = -10.21
+  BIC   = -9.30
+
+BIOLOGICAL PLAUSIBILITY NOTES
+----------------------------------------
+Gompertz: Asymptotic length A exceeds maximum observed mean, consistent with growth plateau. Growth rate k is within a reasonable biological range.
+Logistic: Asymptotic length A exceeds maximum observed mean, consistent with growth plateau. Logistic growth rate k > 0; shape is biologically plausible.
+Von_bertalanffy: Asymptotic length A exceeds maximum observed mean, consistent with growth plateau.
+Linear: Linear model used as a simple baseline; not biologically realistic for full growth.
+Quadratic: Quadratic polynomial baseline; flexible but not mechanistic.
+
+RESIDUAL DIAGNOSTICS
+----------------------------------------
+Gompertz model:
+  Mean residual      : 0.002 mm
+  Residual std       : 0.457 mm
+  Normality p-value  : 0.518
+  Lag-1 autocorr     : -0.260
+
+Logistic model:
+  Mean residual      : 0.004 mm
+  Residual std       : 0.439 mm
+  Normality p-value  : 0.397
+  Lag-1 autocorr     : -0.308
+
+Von_bertalanffy model:
+  Mean residual      : 0.002 mm
+  Residual std       : 0.463 mm
+  Normality p-value  : 0.579
+  Lag-1 autocorr     : -0.241
+
+Linear model:
+  Mean residual      : -0.000 mm
+  Residual std       : 0.515 mm
+  Normality p-value  : 0.760
+  Lag-1 autocorr     : -0.047
+
+Quadratic model:
+  Mean residual      : -0.000 mm
+  Residual std       : 0.469 mm
+  Normality p-value  : 0.520
+  Lag-1 autocorr     : -0.230
+
+SUMMARY INTERPRETATION
+----------------------------------------
+This section should be adapted into the manuscript text. Highlights:
+  • Compare R² and AIC across nonlinear vs baseline models.
+  • Comment on whether the nonlinear Gompertz/Logistic curve captures
+    the saturation / plateau behavior better than linear/quadratic.
+  • Discuss whether asymptotic length and growth rate parameters are
+    biologically plausible given microscope-based measurements.
+  • Use residual diagnostics (normality, autocorrelation) to justify
+    that the model is adequate for growth-trajectory description.

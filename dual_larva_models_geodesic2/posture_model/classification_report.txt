@@ -1,0 +1,30 @@
+Best model : XGBoost
+Selection criterion : weighted F1
+CV strategy : StratifiedKFold(n_splits=3)
+
+RandomForest:
+  mean weighted F1 = 0.6388 ± 0.0064
+  mean accuracy         = 0.6830 ± 0.0215
+
+SVM:
+  mean weighted F1 = 0.6393 ± 0.0150
+  mean accuracy         = 0.6319 ± 0.0152
+
+GradientBoosting:
+  mean weighted F1 = 0.6351 ± 0.0123
+  mean accuracy         = 0.6674 ± 0.0231
+
+XGBoost:
+  mean weighted F1 = 0.6512 ± 0.0091
+  mean accuracy         = 0.6918 ± 0.0107
+
+
+Full-data report (best model retrained on all data):
+                 precision    recall  f1-score   support
+
+    Bad Posture       0.89      0.70      0.78       125
+Correct Posture       0.89      0.97      0.93       326
+
+       accuracy                           0.89       451
+      macro avg       0.89      0.83      0.85       451
+   weighted avg       0.89      0.89      0.89       451

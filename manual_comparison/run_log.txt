@@ -1,0 +1,122 @@
+
+======================================================================
+MANUAL vs. AUTOMATED — Publication-Level Method Agreement Analysis v2
+======================================================================
+Predictions : /Users/taircarmon/Desktop/growth_function_posture_aware/dual_larva_models/predictions/predictions_all_larvae.xlsx
+Output      : /Users/taircarmon/Desktop/growth_function_posture_aware/manual_comparison
+======================================================================
+
+STEP 0 — Loading and filtering automated predictions...
+  Total predictions loaded      : 11,011
+  After filter (valid & T-shape) : 2,688
+
+STEP 1 — Building comparison table (mean + median + trimmed mean)...
+
+── Comparison Table ──────────────────────────────────────────
+manual_date  dev_day  manual_mean_mm  manual_sd_mm  auto_mean_mm  auto_median_mm  auto_trimmed_mm  auto_sd_mm  n_auto  bias_mean_mm  bias_median_mm  bias_trimmed_mm  rel_error_pct
+      03/08        1           1.650         0.100         3.548           3.252            3.299       1.483     194         1.898           1.602            1.649        115.060
+      04/08        2           1.810         0.090         3.876           3.252            3.266       2.657      80         2.066           1.442            1.456        114.131
+   06–07/08        3           1.930         0.004         3.993           3.252            3.400       2.817      98         2.063           1.322            1.470        106.911
+      07/08        6           2.780         0.090         6.194           6.039            6.037       2.502     197         3.414           3.259            3.257        122.816
+      08/08        7           3.370         0.210         5.796           6.039            5.707       2.164     151         2.426           2.669            2.337         71.977
+      09/08        8           3.460         0.220         6.684           6.271            6.457       2.642     136         3.224           2.811            2.997         93.185
+   10–11/08        9           4.550         0.070         7.500           7.432            7.393       2.775     231         2.950           2.882            2.843         64.825
+   11–12/08       11           4.950         0.180         7.691           7.432            7.459       2.710     328         2.741           2.482            2.509         55.381
+   12–15/08       13           5.750         0.380         8.135           7.664            7.847       2.881     720         2.385           1.914            2.097         41.485
+      17/08       16           6.950         0.250         8.000           7.200            7.690       3.124     553         1.050           0.250            0.740         15.102
+      21/08       16           7.230         0.520         8.000           7.200            7.690       3.124     553         0.770          -0.030            0.460         10.644
+
+STEP 2 — Core agreement metrics (MAE, RMSE, nRMSE, CCC, regression)...
+
+── Core Agreement Metrics ────────────────────────────────────
+  n                             : 11
+  MAE                           : 2.2716
+  RMSE                          : 2.4058
+  nRMSE_pct                     : 43.1140
+  MeanBias                      : 2.2716
+  MAPE_pct                      : 73.7742
+  Pearson_r                     : 0.9103
+  Pearson_p                     : 0.0001
+  Spearman_rho                  : 0.9613
+  Spearman_p                    : 0.0000
+  CCC                           : 0.5262
+  reg_slope                     : 0.8087
+  reg_intercept                 : 3.0444
+  reg_se_slope                  : 0.1226
+  reg_se_int                    : 0.5478
+  reg_ci_slope                  : (0.5313, 1.0860)
+  reg_ci_int                    : (1.8051, 4.2836)
+  reg_t_slope1                  : -1.5605
+  reg_p_slope1                  : 0.1531
+  reg_t_int0                    : 5.5571
+  reg_p_int0                    : 0.0004
+  reg_R2                        : 0.8286
+
+STEP 2b — Central tendency robustness...
+
+── Central Tendency Robustness ───────────────────────────────
+  Estimator            MAE     RMSE     Bias    MAPE%   nRMSE%
+  Mean              2.2716   2.4058   2.2716    73.77    43.11
+  Median            1.8783   2.1369   1.8729    61.24    38.30
+  Trimmed-Mean      1.9831   2.1655   1.9831    63.30    38.81
+
+  ✦ Best estimator by MAE: Median (MAE = 1.8783 mm)
+
+STEP 2c — Heteroscedasticity & proportional bias...
+
+── Heteroscedasticity & Proportional Bias ────────────────────
+  |diff| vs mean length : rho = -0.1818,  p = 0.5926  → no proportional error
+  diff  vs mean length  : rho = -0.1818, p = 0.5926  → no proportional bias
+
+STEP 2d — Regression validation (slope ≠ 1, intercept ≠ 0)...
+
+── Regression Validation ─────────────────────────────────────
+  Slope    : 0.8087  95% CI [0.5313, 1.0860]
+             H₀: slope = 1  →  p = 0.1531  (fail to reject H₀)
+  Intercept: 3.0444  95% CI [1.8051, 4.2836]
+             H₀: intercept = 0  →  p = 0.0004  (reject H₀)
+
+STEP 2e — Bootstrap confidence intervals...
+
+── Bootstrap CIs (2000 resamples) ───────────────────────────
+  MAE   95% CI : [1.8096, 2.7313] mm
+  Bias  95% CI : [1.8096, 2.7313] mm
+  Slope 95% CI : [0.5407, 1.2413]
+
+STEP 2f — Outlier sensitivity analysis...
+
+── Outlier Sensitivity (top-5% extreme diffs removed) ────────
+  Metric             Full    Trimmed          Δ
+  MAE              2.2716     2.1573    -0.1143
+  RMSE             2.4058     2.2805    -0.1253
+  Bias             2.2716     2.1573    -0.1143
+  MAPE            73.7742    68.8701    -4.9041
+  n removed : 1  (threshold |diff| > 3.319 mm)
+
+STEP 3 — Statistical testing + Bland–Altman...
+
+── Statistical Tests ─────────────────────────────────────────
+  Shapiro–Wilk p = 0.6505  → normal differences
+  Paired t-test  : t = 9.067,  p = 0.0000
+  Wilcoxon       : W = 0.0,   p = 0.0010
+  Bland–Altman   : bias = 2.272 mm, 95% LoA [0.643, 3.900] mm
+
+STEP 4 — Generating publication figures (8 figures)...
+  ✓ fig1_line_manual_vs_auto.png
+  ✓ fig2_scatter_identity.png
+  ✓ fig3_bland_altman.png
+  ✓ fig4_relative_error.png
+  ✓ fig5_bias_per_day.png
+  ✓ fig6_central_tendency.png
+  ✓ fig7_heteroscedasticity.png
+  ✓ fig8_bootstrap_ci.png
+
+STEP 5 — Saving all outputs...
+  ✓ comparison_table.csv
+  ✓ metrics_summary.txt
+  ✓ latex_section.tex
+
+======================================================================
+DONE — all outputs saved to:
+  /Users/taircarmon/Desktop/growth_function_posture_aware/manual_comparison
+======================================================================

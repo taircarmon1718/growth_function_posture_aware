@@ -1,0 +1,15 @@
+Model     : XGBoost
+Criterion : weighted F1
+CV mean weighted F1 : 0.6512 ± 0.0091
+CV mean accuracy         : 0.6918 ± 0.0107
+Training samples (after upsample): 527
+
+Classification report on FULL dataset (after retrain):
+                 precision    recall  f1-score   support
+
+    Bad Posture       0.89      0.70      0.78       125
+Correct Posture       0.89      0.97      0.93       326
+
+       accuracy                           0.89       451
+      macro avg       0.89      0.83      0.85       451
+   weighted avg       0.89      0.89      0.89       451

@@ -1,0 +1,14 @@
+metric,value
+n_correct,476.000000
+n_distorted,86.000000
+mean_correct,5.930366
+mean_distorted,7.081783
+bias_mm,-1.151417
+bias_pct,-16.258854
+cohens_d,-0.500009
+mann_whitney_u,14614.000000
+mann_whitney_p,0.000024
+t_statistic,-4.267394
+t_test_p,0.000023
+bias_ci_low,-1.676988
+bias_ci_high,-0.626226

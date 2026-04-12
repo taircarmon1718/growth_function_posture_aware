@@ -1,0 +1,226 @@
+
+========================================================================
+STEP 1 – PER-DATE OVERVIEW
+========================================================================
+  All statistics in mm, restricted to predicted-valid larvae with body_length_mm > 0.
+  
+  ▸ 19.10  n=68
+    • mean=3.364  median=3.364  trimmed_mean=3.364  HL=3.364
+    • std=0.000  IQR=0.000  CV=0.0%
+    • range=[3.36, 3.36]  5-95th pct=[3.36, 3.36]
+  ▸ 20.10  n=18
+    • mean=3.364  median=3.364  trimmed_mean=3.364  HL=3.364
+    • std=0.000  IQR=0.000  CV=0.0%
+    • range=[3.36, 3.36]  5-95th pct=[3.36, 3.36]
+  ▸ 21.10  n=19
+    • mean=3.936  median=3.364  trimmed_mean=3.364  HL=3.364
+    • std=2.494  IQR=0.000  CV=63.3%
+    • range=[3.36, 14.23]  5-95th pct=[3.36, 4.45]
+  ▸ 24.10  n=75
+    • mean=5.760  median=3.364  trimmed_mean=5.037  HL=3.945
+    • std=4.054  IQR=2.892  CV=70.4%
+    • range=[3.36, 15.90]  5-95th pct=[3.36, 14.11]
+  ▸ 25.10  n=71
+    • mean=6.288  median=3.364  trimmed_mean=5.535  HL=4.690
+    • std=4.538  IQR=7.253  CV=72.2%
+    • range=[3.36, 17.87]  5-95th pct=[3.36, 14.86]
+  ▸ 26.10  n=78
+    • mean=7.113  median=4.486  trimmed_mean=6.535  HL=7.502
+    • std=4.745  IQR=8.424  CV=66.7%
+    • range=[3.36, 17.55]  5-95th pct=[3.36, 15.61]
+  ▸ 27.10  n=75
+    • mean=7.856  median=5.975  trimmed_mean=7.490  HL=7.830
+    • std=4.634  IQR=8.883  CV=59.0%
+    • range=[3.36, 16.53]  5-95th pct=[3.36, 15.43]
+  ▸ 29.10  n=117
+    • mean=7.672  median=4.486  trimmed_mean=7.085  HL=7.842
+    • std=5.143  IQR=9.028  CV=67.0%
+    • range=[3.36, 19.29]  5-95th pct=[3.36, 16.44]
+  ▸ 31.10  n=278
+    • mean=8.076  median=7.618  trimmed_mean=7.578  HL=7.958
+    • std=4.809  IQR=8.839  CV=59.5%
+    • range=[3.36, 21.98]  5-95th pct=[3.36, 16.45]
+  ▸ 3.11  n=227
+    • mean=9.184  median=8.514  trimmed_mean=8.728  HL=9.000
+    • std=5.535  IQR=10.433  CV=60.3%
+    • range=[3.08, 23.26]  5-95th pct=[3.36, 18.44]
+
+========================================================================
+STEP 2 – DISTRIBUTION SHAPES
+========================================================================
+    • Shapiro-Wilk: 2/10 dates consistent with normality (p>0.05)
+    • D'Agostino:   0/10 dates consistent with normality (p>0.05)
+    ⚠  Majority of dates FAIL normality — non-parametric tests should be preferred.
+
+========================================================================
+STEP 3 – OUTLIER AUDIT
+========================================================================
+    ✓  19.10: 0.0% extreme outliers — max Z=1.00
+    ✓  20.10: 0.0% extreme outliers — max Z=nan
+    ⚠  21.10: 5.3% extreme outliers (IQR method) — max Z=4.24
+    ✓  24.10: 2.7% extreme outliers — max Z=2.52
+    ✓  25.10: 0.0% extreme outliers — max Z=2.57
+    ✓  26.10: 0.0% extreme outliers — max Z=2.21
+    ✓  27.10: 0.0% extreme outliers — max Z=1.89
+    ✓  29.10: 0.0% extreme outliers — max Z=2.27
+    ✓  31.10: 0.0% extreme outliers — max Z=2.90
+    ✓  3.11: 0.0% extreme outliers — max Z=2.55
+
+========================================================================
+STEP 4 – ESTIMATOR COMPARISON
+========================================================================
+    • Max deviation mean vs median: 46.5% on 25.10
+    ⚠  Large mean–median gap suggests skewed distribution or impactful outliers.
+    ⚠  Median may be a more robust daily summary than mean.
+    • Mean absolute deviation across dates: 21.8%
+
+========================================================================
+STEP 5 – BOOTSTRAP CONFIDENCE INTERVALS (BCA)
+========================================================================
+    ⚠  CIs overlap between 19.10 and 20.10 — difference may NOT be significant.
+    ⚠  CIs overlap between 20.10 and 21.10 — difference may NOT be significant.
+    ⚠  CIs overlap between 21.10 and 24.10 — difference may NOT be significant.
+    ⚠  CIs overlap between 24.10 and 25.10 — difference may NOT be significant.
+    ⚠  CIs overlap between 25.10 and 26.10 — difference may NOT be significant.
+    ⚠  CIs overlap between 26.10 and 27.10 — difference may NOT be significant.
+    ⚠  CIs overlap between 27.10 and 29.10 — difference may NOT be significant.
+    ⚠  CIs overlap between 29.10 and 31.10 — difference may NOT be significant.
+    ⚠  CIs overlap between 31.10 and 3.11 — difference may NOT be significant.
+    • 9/9 adjacent-day CI pairs overlap (potential non-significance)
+
+========================================================================
+STEP 6 – HETEROSCEDASTICITY
+========================================================================
+    • Levene's test (equal variances):  stat=46.357  p=0.0000
+    • Brown-Forsythe test:              stat=24.144  p=0.0000
+    • Bartlett's test:                  stat=5950.617  p=0.0000
+    ⚠  Variances are NOT equal across dates (heteroscedastic). Welch-corrected tests required; pooled tests may be unreliable.
+    ⚠  Std correlates with n (r=0.930, p=0.0001) — larger samples also show more variance (or vice versa).
+
+========================================================================
+STEP 7 – PAIRWISE EFFECT SIZES (ADJACENT DAYS)
+========================================================================
+    • 2/9 adjacent pairs are statistically significant (MW p<0.05)
+    • 1/9 pairs show large effect size (|d|≥0.8)
+    ⚠  1 day-pair(s) show NEGATIVE growth (mean decline) — non-monotonic pattern detected.
+
+========================================================================
+STEP 8 – MONOTONIC TREND TESTS
+========================================================================
+    • Spearman ρ = 0.988  (p = 0.0000)
+    • Kendall τ  = 0.956  (p = 0.0000)
+    • Mann-Kendall τ = 0.956  (z = 3.76, p = 0.0002)
+    • Cox-Stuart sign test p = 0.0625
+    • OLS slope = 0.6736 mm/day-step  R² = 0.9469  p = 0.0000
+    ✓  3/4 trend tests are significant — STRONG evidence for a monotonic upward trend in daily mean body length.
+
+========================================================================
+STEP 9 – ANOVA AND KRUSKAL-WALLIS
+========================================================================
+    • One-way ANOVA:    F = 14.044  p = 1.66e-21
+    • Kruskal-Wallis:   H = 133.847  p = 1.92e-24
+    ✓  Parametric ANOVA: dates differ significantly.
+    ✓  Kruskal-Wallis (non-parametric): dates differ significantly.
+
+========================================================================
+STEP 10 – POST-HOC PAIRWISE COMPARISONS
+========================================================================
+    • Dunn's test (Bonferroni): 16/45 pairs significant
+    • See tukey_hsd.csv and dunn_posthoc.csv for full pairwise table.
+
+========================================================================
+STEP 11 – SMOOTHING COMPARISON
+========================================================================
+  Multiple smoothers applied to daily means (LOWESS, cubic spline, rolling mean).
+  Consistent shape across all smoothers would support reliability of the trend.
+    ⚠  Cubic spline shows local DIPS — growth is NOT monotone in the smooth fit.
+
+========================================================================
+STEP 12 – RESIDUAL STRUCTURE
+========================================================================
+    • Lag-1 residual autocorrelation = 0.321
+    ✓  Residuals show no significant autocorrelation — independence assumption holds.
+
+========================================================================
+STEP 13 – COEFFICIENT OF VARIATION AND SAMPLING ADEQUACY
+========================================================================
+    ✓  19.10: CV=0.0%  MoE=0.000mm (0.0%)  n=68 (need 1 for ±10%)
+    ✓  20.10: CV=0.0%  MoE=0.000mm (0.0%)  n=18 (need 1 for ±10%)
+    ⚠  21.10: CV=63.3%  MoE=1.121mm (28.5%)  n=19 (need 155 for ±10%) — VERY HIGH variability
+    ⚠  24.10: CV=70.4%  MoE=0.917mm (15.9%)  n=75 (need 191 for ±10%) — VERY HIGH variability
+    ⚠  25.10: CV=72.2%  MoE=1.056mm (16.8%)  n=71 (need 201 for ±10%) — VERY HIGH variability
+    ⚠  26.10: CV=66.7%  MoE=1.053mm (14.8%)  n=78 (need 171 for ±10%) — VERY HIGH variability
+    ⚠  27.10: CV=59.0%  MoE=1.049mm (13.3%)  n=75 (need 134 for ±10%) — VERY HIGH variability
+    ⚠  29.10: CV=67.0%  MoE=0.932mm (12.1%)  n=117 (need 173 for ±10%) — VERY HIGH variability
+    ⚠  31.10: CV=59.5%  MoE=0.565mm (7.0%)  n=278 (need 137 for ±10%) — VERY HIGH variability
+    ⚠  3.11: CV=60.3%  MoE=0.720mm (7.8%)  n=227 (need 140 for ±10%) — VERY HIGH variability
+
+========================================================================
+FINAL CONCLUSIONS — GROWTH VALIDATION ANALYSIS
+========================================================================
+  Generated: 2026-03-06 10:55:00
+  
+
+------------------------------------------------------------
+A. Does daily mean represent the underlying distribution?
+------------------------------------------------------------
+    ⚠  CONCERN: Average CV across dates is 51.8%. High within-day variability means the mean is a noisy estimator.
+    ⚠  Median or trimmed mean may be more representative.
+
+------------------------------------------------------------
+B. Are day-to-day fluctuations statistically meaningful?
+------------------------------------------------------------
+    ⚠  Only 2/9 adjacent transitions significant — many apparent changes are likely sampling noise.
+
+------------------------------------------------------------
+C. Is there a consistent biological growth pattern?
+------------------------------------------------------------
+    ✓  STRONG evidence: Mann-Kendall τ=0.956 (p=0.0002), Spearman ρ=0.988. OLS R²=0.947. Growth is consistent and upward.
+
+------------------------------------------------------------
+D. Does within-day variability undermine the mean?
+------------------------------------------------------------
+    ⚠  8 date(s) have CV > 50% — within-day variability is very high. Mean may misrepresent the 'typical' larva for those days.
+
+------------------------------------------------------------
+E. Is mean the appropriate estimator?
+------------------------------------------------------------
+    • Mean vs median max deviation: see Step 4.
+    • If distributions are right-skewed or have outliers, median is safer.
+    • Trimmed mean (10%) provides a middle-ground robust estimate.
+
+------------------------------------------------------------
+F. Does smoothing change interpretation?
+------------------------------------------------------------
+  LOWESS, cubic spline, and rolling mean all applied in Step 11.
+  If smoothers agree → trend shape is robust to method choice.
+
+------------------------------------------------------------
+G. Statistical evidence for monotonic growth?
+------------------------------------------------------------
+    ✓  YES — multiple non-parametric tests (Spearman, Kendall, Mann-Kendall) confirm a significant positive trend in mean body length over time.
+    ✓  OLS slope = 0.6736 mm per date-step.
+
+------------------------------------------------------------
+H. Heteroscedasticity
+------------------------------------------------------------
+    ⚠  Levene p=0.0000 — UNEQUAL variances across dates. Welch tests preferred; pooled parametric models may be invalid.
+
+------------------------------------------------------------
+I. Overall Assessment
+------------------------------------------------------------
+  The daily mean body length appears to represent a REAL, STATISTICALLY
+  SUPPORTED upward trend in larva body length over the observation period.
+  
+  CAVEATS:
+    • High within-day variability (CV) means individual daily means are noisy.
+    • Some adjacent-day differences are not individually significant.
+    • Heteroscedasticity may affect parametric test validity.
+    • Autocorrelation in residuals (if present) inflates apparent trend significance.
+    • Bootstrap CIs provide the most reliable uncertainty bounds for the mean.
+  
+  RECOMMENDATION:
+    • Use MEDIAN as primary daily summary (more robust).
+    • Report 95% BCa bootstrap CI alongside each estimate.
+    • LOWESS curve is the most honest growth trajectory visualisation.
+    • Treat individual-day means with caution for dates with n < 50 or CV > 40%.

@@ -50,7 +50,7 @@ warnings.filterwarnings("ignore")
 # CONFIGURATION
 # ---------------------------------------------------------------------
 ROOT_DIR = Path(__file__).resolve().parents[2]
-PREDICTIONS_FILE = ROOT_DIR / "dual_larva_models_geodesic" / "predictions" / "predictions_all_larvae.xlsx"
+PREDICTIONS_FILE = ROOT_DIR / "dual_larva_models_geodesic2" / "predictions" / "predictions_all_larvae.xlsx"
 OUTPUT_DIR = ROOT_DIR / "statistical_analysis" / "growth_modeling"
 
 # Chronological date order used throughout the project
@@ -101,7 +101,7 @@ def quad_model(t, a, b, c):
     return a + b * t + c * t**2
 
 # ---------------------------------------------------------------------
-# DATE NORMALIZATION HELPER
+# DATE NORMALIZATION & DAILY MEANS
 # ---------------------------------------------------------------------
 
 def _normalize_date_value(val):
@@ -116,7 +116,6 @@ def _normalize_date_value(val):
     """
     # Already string
     if isinstance(val, str):
-        # If something like '19.1' and not '.11', map to '.10'
         if val.endswith('.1') and not val.endswith('.11'):
             return val[:-2] + '.10'
         return val
@@ -131,11 +130,36 @@ def _normalize_date_value(val):
     # Fallback
     return str(val)
 
+
+def load_posture_filtered_daily_means() -> pd.DataFrame:
+    """Load predictions and compute posture-filtered daily mean body length.
+
+    Returns a DataFrame with columns:
+        'date', 'day_index', 'n', 'mean_mm', 'std_mm'
+    using only larvae with predicted_posture == 1 and body_length_mm > 0.
+    Dates are normalized to canonical 'DD.MM' strings and restricted to
+    DATE_ORDER.
+    """
+    if not PREDICTIONS_FILE.exists():
+        raise FileNotFoundError(f"Predictions file not found: {PREDICTIONS_FILE}")
+
+    df = pd.read_excel(PREDICTIONS_FILE)
+    required_cols = {"date", "predicted_posture", "body_length_mm"}
+    if not required_cols.issubset(df.columns):
+        raise ValueError(
+            f"Predictions file is missing required columns: {required_cols - set(df.columns)}"
+        )
+
+    # Normalize date encodings
+    df["date"] = df["date"].apply(_normalize_date_value)
+
+    # Posture-filtered larvae with positive length
+    df_posture = df[(df["predicted_posture"] == 1) & (df["body_length_mm"] > 0)].copy()
+    if df_posture.empty:
         raise ValueError("No posture-filtered larvae found in predictions file.")
 
-    # Restrict to known DATE_ORDER if present
+    # Restrict to known DATE_ORDER
     df_posture = df_posture[df_posture["date"].isin(DATE_ORDER)]
-
     if df_posture.empty:
         raise ValueError("Posture-filtered data contains no rows matching DATE_ORDER dates.")
 
@@ -155,8 +179,8 @@ def _normalize_date_value(val):
 
     if not stats_list:
         raise ValueError("No daily statistics could be computed from posture-filtered data.")
-    # Normalize date encodings to canonical 'DD.MM' strings
-    df["date"] = df["date"].apply(_normalize_date_value)
+
+    df_daily = pd.DataFrame(stats_list)
     return df_daily
 
 # ---------------------------------------------------------------------
@@ -164,14 +188,38 @@ def _normalize_date_value(val):
 # ---------------------------------------------------------------------
 
 def fit_curve(model_func, t, y, p0, bounds=(-np.inf, np.inf)):
-    """Fit a nonlinear model using scipy.curve_fit with reasonable defaults."""
-    # Restrict to known DATE_ORDER
+    """Fit a nonlinear model using scipy.curve_fit with reasonable defaults.
+
+    Returns
+    -------
+    popt : array
+        Optimal parameter values.
+    pcov : 2D array
+        Covariance matrix of the parameters.
+    perr : array
+        Standard errors (sqrt of diagonal of pcov).
+    """
+    t = np.asarray(t, dtype=float)
+    y = np.asarray(y, dtype=float)
+    if t.size == 0 or y.size == 0:
+        raise ValueError("Empty data passed to fit_curve().")
+
+    popt, pcov = curve_fit(
+        model_func,
+        t,
+        y,
+        p0=p0,
+        bounds=bounds,
+        maxfev=10000,
+    )
     perr = np.sqrt(np.diag(pcov))
     return popt, pcov, perr
 
-        raise ValueError("Posture-filtered data contains no rows matching DATE_ORDER dates after normalization.")
+# ---------------------------------------------------------------------
+# MODEL FITTING UTILITIES
+# ---------------------------------------------------------------------
+
 def model_fit_stats(y_obs, y_pred, num_params):
-    # Aggregate daily means in chronological order
     y_obs = np.asarray(y_obs)
     y_pred = np.asarray(y_pred)
     n = len(y_obs)
@@ -670,4 +718,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

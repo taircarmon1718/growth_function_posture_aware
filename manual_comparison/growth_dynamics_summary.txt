@@ -1,0 +1,69 @@
+======================================================================
+GROWTH TRAJECTORY DYNAMICS ANALYSIS
+======================================================================
+
+1. OFFSET-NORMALISED TRAJECTORY (bias removed)
+──────────────────────────────────────────────────────────────────────
+   Pearson r          : 0.8968  (p = 0.0004)
+   MAE                : 0.9471 mm
+   RMSE               : 1.1458 mm
+
+2. DAY-TO-DAY GROWTH INCREMENTS
+──────────────────────────────────────────────────────────────────────
+   Pearson r          : 0.6198  (p = 0.0750)
+   MAE                : 0.2792 mm/day
+   RMSE               : 0.3236 mm/day
+
+   Increment table (mm/day):
+   Interval              ΔManual      ΔAuto    Δ Error
+   D1→D2                  0.1600    -0.1241    -0.2841
+   D2→D3                  0.1200     0.2264    +0.1064
+   D3→D6                  0.2833     0.9094    +0.6261
+   D6→D7                  0.5900     0.3212    -0.2688
+   D7→D8                  0.0900     0.3620    +0.2720
+   D8→D9                  1.0900     1.1148    +0.0248
+   D9→D11                 0.2000    -0.0839    -0.2839
+   D11→D13                0.4000     0.1816    -0.2184
+   D13→D16                0.4467     0.0188    -0.4279
+
+3. RELATIVE GROWTH RATE
+──────────────────────────────────────────────────────────────────────
+   Pearson r          : 0.5177  (p = 0.1534)
+   MAE                : 0.087101 day⁻¹
+
+   RGR table (day⁻¹):
+   Interval             RGR Manual     RGR Auto            Δ
+   D1→D2                  0.096970    -0.037062    -0.134032
+   D2→D3                  0.066298     0.070218    +0.003920
+   D3→D6                  0.146805     0.263546    +0.116741
+   D6→D7                  0.212230     0.051981    -0.160249
+   D7→D8                  0.026706     0.055698    +0.028991
+   D8→D9                  0.315029     0.162462    -0.152567
+   D9→D11                 0.043956    -0.010515    -0.054471
+   D11→D13                0.080808     0.023256    -0.057552
+   D13→D16                0.077681     0.002295    -0.075386
+
+4. GOMPERTZ GROWTH MODEL
+──────────────────────────────────────────────────────────────────────
+   Manual  : A=19.004 mm,  k=0.0631 day⁻¹,  B=2.700
+   A 95% CI: [12.048, 103.098]  k 95% CI: [0.0299, 0.0932]
+   Automated: A=8.813 mm,  k=0.2316 day⁻¹,  B=1.500
+   A 95% CI: [8.040, 10.170]  k 95% CI: [0.1580, 0.3210]
+   ΔA (Auto−Manual) : -10.192 mm
+   Δk (Auto−Manual) : +0.1685 day⁻¹
+
+======================================================================
+INTERPRETATION
+======================================================================
+
+   The normalised trajectories show moderate correlation (r = 0.897), 
+   suggesting partial divergence in growth dynamics beyond the mean 
+   bias. 
+
+   Day-to-day growth increments show weaker correlation (r = 0.620), 
+   indicating that growth velocity estimates differ between methods. 
+
+   CONCLUSION: One or more thresholds were not met (norm r = 0.897, incr 
+   r = 0.620). Growth dynamics may not be fully preserved. 
+
+======================================================================

@@ -49,14 +49,14 @@ from scipy.interpolate import make_interp_spline
 from scipy.stats import (
     shapiro, normaltest, anderson, levene, bartlett,
     kruskal, f_oneway, spearmanr, kendalltau,
-    mannwhitneyu, ttest_ind
+    mannwhitneyu, ttest_ind, mode
 )
-from statsmodels.stats.multicomp import pairwise_tukeyhsd
-from statsmodels.nonparametric.smoothers_lowess import lowess
-
-warnings.filterwarnings('ignore')
-
-# ─────────────────────────────────────────────────────────────────────────────
+from scipy.signal import find_peaks, argrelextrema
+from scipy.spatial.distance import euclidean
+from scipy.cluster.hierarchy import dendrogram, linkage, fcluster
+from scipy.optimize import curve_fit
+from sklearn.mixture import GaussianMixture
+from sklearn.cluster import AgglomerativeClustering
 #  PATHS
 # ─────────────────────────────────────────────────────────────────────────────
 ROOT     = Path(__file__).parent.resolve()
@@ -145,1212 +145,1239 @@ def load_data() -> tuple[pd.DataFrame, dict[str, np.ndarray]]:
     print("=" * 70)
 
     raw = pd.read_excel(DATA_FILE)
-    print(f"  Raw rows : {len(raw)}")
-
-    # Keep only larvae predicted valid with a positive body length
-    df = raw[
-        (raw['predicted_valid'] == 1) &
-        (raw['body_length_mm'] > 0) &
-        (~raw['date'].astype(str).isin(EXCLUDED))
-    ].copy()
-
-    # Normalise date strings
-    df['date'] = df['date'].astype(str).apply(
-        lambda s: f"{s.split('.')[0]}.10"
-        if s.split('.')[-1] == '1' else s
+    # record raw counts for report metadata
+    global RAW_ROWS, RAW_VALID_ROWS, RAW_FILE
+    RAW_ROWS = len(raw)
+    RAW_FILE = str(DATA_FILE)
+    # Diagnostic counts to match pipeline outputs
+    # After valid filter (predicted_valid == 1)
+    mask_valid = (
+        (raw.get('predicted_valid') == 1) &
+        (raw.get('body_length_mm', 0) > 0) &
     )
+    n_after_valid = int(mask_valid.sum())
 
-    # Restrict to known date order
-    df = df[df['date'].isin(DATE_ORDER)].copy()
-    df['date_idx'] = df['date'].map({d: i for i, d in enumerate(DATE_ORDER)})
-    df.sort_values('date_idx', inplace=True)
+    # After posture filter (predicted_valid ==1 AND predicted_posture ==1)
+    mask_posture = (
+        mask_valid &
+        (raw.get('predicted_posture') == 1)
+    )
+    n_after_posture = int(mask_posture.sum())
 
-    print(f"  Valid rows with length > 0 : {len(df)}")
-    print(f"  Dates present : {sorted(df['date'].unique(), key=date_key)}")
+    print(f"  After valid filter           : {n_after_valid}")
+    print(f"  After posture filter         : {n_after_posture}")
 
-    # Dict of arrays per date
-    groups: dict[str, np.ndarray] = {}
-    for date in DATE_ORDER:
-        arr = df[df['date'] == date]['body_length_mm'].values
-        if len(arr) >= MIN_N_VALID:
-            groups[date] = arr
+    # Apply the stricter pipeline filter: require both valid AND posture
+    df = raw[mask_posture].copy()
+    RAW_VALID_ROWS = len(df)
+
+    print(f"  Valid rows with length > 0 (valid & posture): {len(df)}")
+    # Dict of arrays per date (only dates with enough samples)
+# Alias for sorting to match pipeline naming
+date_sort_key = date_key
+
+def step1_overview(df_full: pd.DataFrame, groups: dict) -> pd.DataFrame:
+    # Build per-date weighted statistics using the pipeline weighting/definitions
+    for date in groups.keys():
+        sub = df_full[df_full['date'] == date].copy()
+        lengths = sub['body_length_mm'].astype(float).values
+        if lengths.size == 0:
+            continue
+
+        # compute per-row weight: 0.7 * valid_confidence + 0.3 * posture_confidence
+        def _row_weight(row):
+            v = float(row.get('valid_confidence', 0.0))
+            p = row.get('posture_confidence', np.nan)
+            if pd.notna(p):
+                return 0.7 * v + 0.3 * float(p)
+            return v
+
+        weights = sub.apply(_row_weight, axis=1).astype(float).values
+        n = len(lengths)
+
+        sum_w = float(weights.sum())
+        if sum_w <= 0.0:
+            mean_raw = float(lengths.mean())
+            std_raw = float(lengths.std(ddof=0)) if n > 1 else 0.0
         else:
-            print(f"    ⚠  {date}: only {len(arr)} valid samples — excluded")
+            mean_raw = float((weights * lengths).sum() / sum_w)
+            if n > 1:
+                var_w = float(((weights * (lengths - mean_raw) ** 2).sum()) / sum_w)
+                std_raw = float(np.sqrt(max(var_w, 0.0)))
+            else:
+                std_raw = 0.0
 
-    print(f"  Dates included in analysis : {list(groups.keys())}")
-    return df, groups
+        final_mean = mean_raw
+
+        q1, q3 = np.percentile(lengths, [25, 75])
+            'date': date,
+            'n': n,
+            'mean_mm': final_mean,
+            'std_mm': std_raw,
+            'iqr_mm': q3 - q1,
+            'min_mm': float(lengths.min()),
+            'max_mm': float(lengths.max()),
+    if ov.empty:
+        # ensure we always return a DataFrame
+        ov = pd.DataFrame(columns=['date', 'n', 'mean_mm', 'std_mm', 'iqr_mm', 'min_mm', 'max_mm'])
+
+    # sort dates using the pipeline's date_sort_key and reset index
+    ov = ov.sort_values('date', key=lambda s: [date_sort_key(d) for d in s]).reset_index(drop=True)
+
+    # Add percent changes: from previous date and from first date
+    ov['pct_change_prev'] = np.nan
+    ov['pct_change_first'] = np.nan
+    if not ov.empty:
+        first_mean = ov.loc[0, 'mean_mm']
+        for i in range(len(ov)):
+            if i > 0:
+                prev = ov.loc[i - 1, 'mean_mm']
+                cur = ov.loc[i, 'mean_mm']
+                ov.at[i, 'pct_change_prev'] = (cur - prev) / prev * 100.0 if prev > 0 else np.nan
+            ov.at[i, 'pct_change_first'] = (ov.loc[i, 'mean_mm'] - first_mean) / first_mean * 100.0 if first_mean > 0 else np.nan
+
+    ov['std_mm'] = ov['std_mm'].fillna(0.0)
+    # Report lines
+    R.p("Statistics computed using pipeline weighting: weight = 0.7*valid_confidence + 0.3*posture_confidence (posture NaN → use valid_confidence).")
+        R.bullet(f"mean={row['mean_mm']:.3f}  std={row['std_mm']:.3f}  pct_prev={row['pct_change_prev']:.2f}%  pct_first={row['pct_change_first']:.2f}%")
+        R.bullet(f"range=[{row['min_mm']:.2f}, {row['max_mm']:.2f}]  IQR={row['iqr_mm']:.3f}")
+            # Try to use the optional 'outliers' package if available
+            try:
+                import outliers  # type: ignore
+                grubbs_test = outliers.grubbs.test(arr, alpha=ALPHA)
+                grubbs_outliers = np.where(np.isin(np.arange(n), grubbs_test.outliers))[0]
+            except Exception:
+                # Fallback: no 'outliers' package — use conservative heuristic (z-score)
+                z = np.abs(stats.zscore(arr))
+                grubbs_outliers = np.where(z > 3)[0]
+        sns.boxplot(x=[row['date']] * n, y=arr, ax=ax, color='lightgray', fliersize=0)
+        # Grubbs' test outliers
+        # Prepare a safe default for indices array used by visualization
+        indices_arr = np.array([])
+
+            # Grubbs' test outliers (visualization) — normalize stored indices robustly
+            indices_raw = row.get('outlier_indices')
+            if isinstance(indices_raw, str):
+                try:
+                    indices_arr = np.array(eval(indices_raw))
+                except Exception:
+                    indices_arr = np.array([])
+            elif indices_raw is None or (isinstance(indices_raw, float) and np.isnan(indices_raw)):
+                indices_arr = np.array([])
+            else:
+                try:
+                    indices_arr = np.array(indices_raw)
+                except Exception:
+                    indices_arr = np.array([])
+
+            # Grubbs' outliers
+            if indices_arr.size > 0:
+                grubbs_outliers_vals = arr[indices_arr]
+                sns.scatterplot(x=[row['date']] * len(grubbs_outliers_vals), y=grubbs_outliers_vals,
+                                ax=ax, color='red', label="Grubbs' outliers", s=100, edgecolor='black')
+        if row['iqr_outliers'] > 0 and indices_arr.size > 0:
+            iqr_outliers_vals = arr[indices_arr]
+            sns.scatterplot(x=[row['date']] * len(iqr_outliers_vals), y=iqr_outliers_vals,
+        if row['zscore_outliers'] > 0 and indices_arr.size > 0:
+            zscore_outliers_vals = arr[indices_arr]
+            sns.scatterplot(x=[row['date']] * len(zscore_outliers_vals), y=zscore_outliers_vals,
+    # Add a helper multimodal flag for downstream reporting (matches interpretation heuristic)
+    if not gmm_results.empty:
+        gmm_results['multimodal_likely'] = gmm_results['delta_bic_2vs1'].fillna(0) < -2.0
+    else:
+        gmm_results['multimodal_likely'] = []
+
+    # Provide a cohort_df alias with legacy column names expected later in the script
+    cohort_df = gmm_results.copy()
+    # Map legacy column names if absent
+    if 'bic_1comp' not in cohort_df.columns:
+        cohort_df['bic_1comp'] = cohort_df.get('bic_1', np.nan)
+    if 'bic_2comp' not in cohort_df.columns:
+        cohort_df['bic_2comp'] = cohort_df.get('bic_2', np.nan)
+    if 'bic_3comp' not in cohort_df.columns:
+        cohort_df['bic_3comp'] = cohort_df.get('bic_3', np.nan)
+
+    # Ensure dates variable exists (order from groups)
+    dates = list(groups.keys())
+
+        # Safely lookup per-date gmm row if available
+        if not gmm_results.empty and date in gmm_results['date'].values:
+            row = gmm_results[gmm_results['date'] == date].iloc[0]
+        else:
+            # fallback row-like object with NaNs
+            row = {'bic_1': np.nan, 'delta_bic_2vs1': np.nan, 'interpretation': 'no-model'}
+
+        # Determine best_k for this date (fallback to 1)
+        try:
+            best_k = int(row['best_k']) if 'best_k' in row.index else int(row.get('best_k', 1))
+        except Exception:
+            best_k = int(row.get('best_k', 1)) if isinstance(row, dict) else 1
+        # Fit and plot GMM (local re-fit for visualization if needed)
+        delta_bic = row['delta_bic_2vs1'] if 'delta_bic_2vs1' in row.index else row.get('delta_bic_2vs1', np.nan)
+                f"{row['interpretation'] if 'interpretation' in row.index else row.get('interpretation', 'n/a')}")
+        ax.set_xlabel('Length (mm)', fontsize=8)
+    plt.suptitle('Cohort Structure Analysis: Gaussian Mixture Models', fontsize=14, fontweight='bold')
+    savefig('02b_cohort_structure_gmm.png')
+    # ── Visualization: BIC comparison ────────────────────────────────────────
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+    # Panel A: BIC scores by n_components
+    ax = axes[0]
+    dates_with_data = cohort_df[cohort_df['n'] >= 15]['date'].tolist() if 'n' in cohort_df.columns else cohort_df['date'].tolist()
+    x_pos = np.arange(len(dates_with_data))
+    width = 0.25
+    bic1 = cohort_df[cohort_df['date'].isin(dates_with_data)]['bic_1comp'].values
+    bic2 = cohort_df[cohort_df['date'].isin(dates_with_data)]['bic_2comp'].values
+    bic3 = cohort_df[cohort_df['date'].isin(dates_with_data)]['bic_3comp'].values
+    ax.bar(x_pos - width, bic1, width, label='1 component', alpha=0.8)
+    ax.bar(x_pos, bic2, width, label='2 components', alpha=0.8)
+    ax.bar(x_pos + width, bic3, width, label='3 components', alpha=0.8)
+    ax.set_xlabel('Date', fontweight='bold')
+    ax.set_ylabel('BIC (lower = better)', fontweight='bold')
+    ax.set_title('BIC Comparison Across Models', fontweight='bold')
+    ax.set_xticks(x_pos)
+    ax.set_xticklabels(dates_with_data, rotation=45)
+    ax.legend()
+    ax.grid(axis='y', alpha=0.3)
+    # Panel B: Delta BIC (2 vs 1 component)
+    ax = axes[1]
+    delta_bic = cohort_df[cohort_df['date'].isin(dates_with_data)]['delta_bic_2vs1'].values
+    colors = ['red' if x < -10 else 'orange' if x < 0 else 'green' for x in delta_bic]
+    ax.bar(x_pos, delta_bic, color=colors, alpha=0.7)
+    ax.axhline(0, color='black', linestyle='--', linewidth=1)
+    ax.axhline(-10, color='red', linestyle=':', linewidth=1, label='ΔBIC=-10 threshold')
+    ax.set_xlabel('Date', fontweight='bold')
+    ax.set_ylabel('ΔBIC (2 comp - 1 comp)', fontweight='bold')
+    ax.set_title('Evidence for Multiple Cohorts\n(ΔBIC < -10 = strong evidence)', fontweight='bold')
+    ax.set_xticks(x_pos)
+    ax.set_xticklabels(dates_with_data, rotation=45)
+    ax.legend()
+    ax.grid(axis='y', alpha=0.3)
+    plt.tight_layout()
+    savefig('02b_cohort_bic_comparison.png')
+    # ── Report summary ───────────────────────────────────────────────────────
+    R.h1("Step 2B – Cohort Structure Analysis")
+    R.p("Objective: Determine if daily distributions represent single populations or mixtures of cohorts.")
+    n_multimodal = int(cohort_df['multimodal_likely'].sum()) if 'multimodal_likely' in cohort_df.columns else 0
+    n_analyzed = len(cohort_df[cohort_df['n'] >= 15]) if 'n' in cohort_df.columns else len(cohort_df)
+    R.bullet(f"Dates analyzed: {n_analyzed}/{n_dates} (≥15 larvae required)")
+    R.bullet(f"Dates with likely multimodal structure: {n_multimodal}/{n_analyzed}")
+    if n_multimodal > 0:
+        multimodal_dates = cohort_df[cohort_df['multimodal_likely']]['date'].tolist()
+        R.bullet(f"Dates showing cohort structure: {', '.join(multimodal_dates)}")
+        R.warn(f"COHORT MIXING DETECTED: {n_multimodal} dates show evidence of multiple cohorts.")
+        R.p("This suggests overlapping larval populations from different hatching events.")
+        R.p("Mean body length may not accurately represent a single growing cohort.")
+        R.ok("No strong evidence of cohort mixing detected.")
+    # Interpretation for growth curve
+    if n_multimodal >= 3:
+        R.warn("Multiple dates show cohort structure — this could explain non-monotonic growth patterns.")
+        R.p("The observed 'growth curve' may actually represent shifting cohort composition over time,")
+        R.p("rather than true ontogenetic growth of a single cohort.")
+
+    return cohort_df
+        if n < 10:
+            # Too few samples
+def main():
+    try:
+        df_full, groups = load_data()
+        ov = step1_overview(df_full, groups)
+        _ = step2_distributions(groups, ov)
+        outliers_df = step3_outliers(groups)
+        # GMM decomposition (may be heavy)
+        try:
+            gmm_results, cohort_assignments, cohort_stats = step2c_gmm_cohort_decomposition(groups, ov, df_full)
+        except Exception as e:
+            print(f"  ⚠ GMM decomposition failed: {e}")
+            gmm_results, cohort_assignments, cohort_stats = pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+        # KDE-based decomposition
+        try:
+            kde_stats = step2d_kde_cohort_decomposition(groups)
+        except Exception as e:
+            print(f"  ⚠ KDE decomposition failed: {e}")
+            kde_stats = pd.DataFrame()
+        # Save report
+        report_path = REP_DIR / f"growth_validation_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+        R.save(report_path)
+        print("\nDONE — outputs saved under:")
+        print(f"  {OUT_ROOT}")
+    except Exception as ex:
+        traceback.print_exc()
+        print(f"Fatal error during analysis: {ex}")
+if __name__ == '__main__':
+    main()
+
+    R.bullet(f"Dates analyzed: {n_analyzed}/{n_dates} (≥15 larvae required)")
+    R.bullet(f"Dates with likely multimodal structure: {n_multimodal}/{n_analyzed}")
+
+    if n_multimodal > 0:
+        multimodal_dates = cohort_df[cohort_df['multimodal_likely']]['date'].tolist()
+        R.bullet(f"Dates showing cohort structure: {', '.join(multimodal_dates)}")
+        R.warn(f"COHORT MIXING DETECTED: {n_multimodal} dates show evidence of multiple cohorts.")
+        R.p("This suggests overlapping larval populations from different hatching events.")
+        R.p("Mean body length may not accurately represent a single growing cohort.")
+    else:
+        R.ok("No strong evidence of cohort mixing detected.")
+        R.p("Daily distributions are generally consistent with single populations.")
+
+    # Interpretation for growth curve
+    if n_multimodal >= 3:
+        R.warn("Multiple dates show cohort structure — this could explain non-monotonic growth patterns.")
+        R.p("The observed 'growth curve' may actually represent shifting cohort composition over time,")
+        R.p("rather than true ontogenetic growth of a single cohort.")
+
+    return cohort_df
+
+
+    # Panel A: BIC scores by n_components
+    ax = axes[0]
+    dates_with_data = cohort_df[cohort_df['n'] >= 15]['date'].tolist()
+    x_pos = np.arange(len(dates_with_data))
+    width = 0.25
+
+    bic1 = cohort_df[cohort_df['date'].isin(dates_with_data)]['bic_1comp'].values
+    bic2 = cohort_df[cohort_df['date'].isin(dates_with_data)]['bic_2comp'].values
+    bic3 = cohort_df[cohort_df['date'].isin(dates_with_data)]['bic_3comp'].values
+
+    ax.bar(x_pos - width, bic1, width, label='1 component', alpha=0.8)
+    ax.bar(x_pos, bic2, width, label='2 components', alpha=0.8)
+    ax.bar(x_pos + width, bic3, width, label='3 components', alpha=0.8)
+    ax.set_xlabel('Date', fontweight='bold')
+    ax.set_ylabel('BIC (lower = better)', fontweight='bold')
+    ax.set_title('BIC Comparison Across Models', fontweight='bold')
+    ax.set_xticks(x_pos)
+    ax.set_xticklabels(dates_with_data, rotation=45)
+    ax.legend()
+    ax.grid(axis='y', alpha=0.3)
+
+    # Panel B: Delta BIC (2 vs 1 component)
+    ax = axes[1]
+    delta_bic = cohort_df[cohort_df['date'].isin(dates_with_data)]['delta_bic_2vs1'].values
+    colors = ['red' if x < -10 else 'orange' if x < 0 else 'green' for x in delta_bic]
+
+    ax.bar(x_pos, delta_bic, color=colors, alpha=0.7)
+    ax.axhline(0, color='black', linestyle='--', linewidth=1)
+    ax.axhline(-10, color='red', linestyle=':', linewidth=1, label='ΔBIC=-10 threshold')
+    ax.set_xlabel('Date', fontweight='bold')
+    ax.set_ylabel('ΔBIC (2 comp - 1 comp)', fontweight='bold')
+    ax.set_title('Evidence for Multiple Cohorts\n(ΔBIC < -10 = strong evidence)', fontweight='bold')
+    ax.set_xticks(x_pos)
+    ax.set_xticklabels(dates_with_data, rotation=45)
+    ax.legend()
+    ax.grid(axis='y', alpha=0.3)
+
+    plt.tight_layout()
+    savefig('02b_cohort_bic_comparison.png')
+
+    # ── Report summary ───────────────────────────────────────────────────────
+    R.h1("Step 2B – Cohort Structure Analysis")
+    R.p("Objective: Determine if daily distributions represent single populations or mixtures of cohorts.")
+
+    n_multimodal = cohort_df['multimodal_likely'].sum()
+    n_analyzed = len(cohort_df[cohort_df['n'] >= 15])
+
+    R.bullet(f"Dates analyzed: {n_analyzed}/{n_dates} (≥15 larvae required)")
+    R.bullet(f"Dates with likely multimodal structure: {n_multimodal}/{n_analyzed}")
+
+    if n_multimodal > 0:
+        multimodal_dates = cohort_df[cohort_df['multimodal_likely']]['date'].tolist()
+        R.bullet(f"Dates showing cohort structure: {', '.join(multimodal_dates)}")
+        R.warn(f"COHORT MIXING DETECTED: {n_multimodal} dates show evidence of multiple cohorts.")
+        R.p("This suggests overlapping larval populations from different hatching events.")
+        R.p("Mean body length may not accurately represent a single growing cohort.")
+    else:
+        R.ok("No strong evidence of cohort mixing detected.")
+        R.p("Daily distributions are generally consistent with single populations.")
+
+    # Interpretation for growth curve
+    if n_multimodal >= 3:
+        R.warn("Multiple dates show cohort structure — this could explain non-monotonic growth patterns.")
+        R.p("The observed 'growth curve' may actually represent shifting cohort composition over time,")
+        R.p("rather than true ontogenetic growth of a single cohort.")
+
+    return cohort_df
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  STEP 1 – PER-DATE OVERVIEW TABLE
+#  STEP 2C – GAUSSIAN MIXTURE MODEL COHORT DECOMPOSITION
 # ─────────────────────────────────────────────────────────────────────────────
-def step1_overview(groups: dict) -> pd.DataFrame:
+def step2c_gmm_cohort_decomposition(groups: dict, ov: pd.DataFrame, df_full: pd.DataFrame):
+    """
+    Identify and separate potential larval cohorts using Gaussian Mixture Models.
+
+    This analysis fits GMMs with 1, 2, 3 components to each date's distribution,
+    selects the optimal model using BIC, assigns larvae to cohorts, and tracks
+    cohort-specific growth trajectories.
+
+    Args:
+        groups: dict mapping date -> body_length_mm array
+        ov: overview DataFrame with per-date statistics
+        df_full: full DataFrame with all larvae data
+
+    Returns:
+        gmm_results: DataFrame with model selection results
+        cohort_assignments: DataFrame with per-larva cohort assignments
+        cohort_stats: DataFrame with per-cohort statistics
+    """
     print("\n" + "=" * 70)
-    print("STEP 1 — PER-DATE OVERVIEW")
-    print("=" * 70)
-
-    rows = []
-    for date, arr in groups.items():
-        tm  = stats.trim_mean(arr, TRIM_FRAC)
-        hl  = np.median([np.mean([a, b]) for i, a in enumerate(arr) for b in arr[i:]])
-        q1, q3 = np.percentile(arr, [25, 75])
-        rows.append({
-            'date':         date,
-            'n':            len(arr),
-            'mean_mm':      np.mean(arr),
-            'median_mm':    np.median(arr),
-            'trimmed_mean': tm,
-            'hodges_lehmann': hl,
-            'std_mm':       np.std(arr, ddof=1),
-            'iqr_mm':       q3 - q1,
-            'cv_pct':       100 * np.std(arr, ddof=1) / np.mean(arr),
-            'min_mm':       arr.min(),
-            'max_mm':       arr.max(),
-            'q5_mm':        np.percentile(arr, 5),
-            'q95_mm':       np.percentile(arr, 95),
-        })
-
-    ov = pd.DataFrame(rows)
-    savecsv(ov, 'overview_per_date.csv')
-
-    R.h1("Step 1 – Per-Date Overview")
-    R.p("All statistics in mm, restricted to predicted-valid larvae with body_length_mm > 0.")
-    R.p()
-    for _, row in ov.iterrows():
-        R.h3(f"{row['date']}  n={int(row['n'])}")
-        R.bullet(f"mean={row['mean_mm']:.3f}  median={row['median_mm']:.3f}  "
-                 f"trimmed_mean={row['trimmed_mean']:.3f}  HL={row['hodges_lehmann']:.3f}")
-        R.bullet(f"std={row['std_mm']:.3f}  IQR={row['iqr_mm']:.3f}  CV={row['cv_pct']:.1f}%")
-        R.bullet(f"range=[{row['min_mm']:.2f}, {row['max_mm']:.2f}]  "
-                 f"5-95th pct=[{row['q5_mm']:.2f}, {row['q95_mm']:.2f}]")
-    return ov
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  STEP 2 – DISTRIBUTION SHAPES
-# ─────────────────────────────────────────────────────────────────────────────
-def step2_distributions(groups: dict, ov: pd.DataFrame):
-    print("\n" + "=" * 70)
-    print("STEP 2 — DISTRIBUTION SHAPES")
+    print("STEP 2C — GMM COHORT DECOMPOSITION")
     print("=" * 70)
 
     dates = list(groups.keys())
+
+    # ── 1. Model Fitting and Selection ──────────────────────────────────────
+    print("\n  Fitting Gaussian Mixture Models...")
+
+    gmm_results_rows = []
+    all_cohort_assignments = []
+    all_cohort_stats = []
+
+    for date in dates:
+        arr = groups[date]
+        n = len(arr)
+
+        if n < 10:
+            # Too few samples
+            gmm_results_rows.append({
+                'date': date,
+                'n': n,
+                'best_k': 1,
+                'bic_1': np.nan,
+                'bic_2': np.nan,
+                'bic_3': np.nan,
+                'aic_1': np.nan,
+                'aic_2': np.nan,
+                'aic_3': np.nan,
+                'delta_bic_2vs1': np.nan,
+                'delta_bic_3vs2': np.nan,
+                'interpretation': 'insufficient data'
+            })
+            continue
+
+        X = arr.reshape(-1, 1)
+
+        # Fit GMMs with k=1,2,3
+        bic_scores = {}
+        aic_scores = {}
+        gmm_models = {}
+
+        for k in [1, 2, 3]:
+            try:
+                gmm = GaussianMixture(
+                    n_components=k,
+                    covariance_type='full',
+                    random_state=42,
+                    max_iter=300,
+                    n_init=5
+                )
+                gmm.fit(X)
+                bic_scores[k] = gmm.bic(X)
+                aic_scores[k] = gmm.aic(X)
+                gmm_models[k] = gmm
+            except Exception as e:
+                print(f"    Warning: GMM k={k} failed for {date}: {e}")
+                bic_scores[k] = np.nan
+                aic_scores[k] = np.nan
+
+        # Select best model (lowest BIC)
+        valid_bic = {k: v for k, v in bic_scores.items() if not np.isnan(v)}
+        if valid_bic:
+            best_k = min(valid_bic, key=valid_bic.get)
+        else:
+            best_k = 1
+
+        # Compute delta BIC
+        delta_bic_2vs1 = bic_scores.get(2, np.nan) - bic_scores.get(1, np.nan)
+        delta_bic_3vs2 = bic_scores.get(3, np.nan) - bic_scores.get(2, np.nan)
+
+        # Interpretation based on delta BIC
+        if np.isnan(delta_bic_2vs1):
+            interpretation = 'model fitting failed'
+        elif delta_bic_2vs1 < -10:
+            interpretation = f'{best_k} cohorts (strong evidence)'
+        elif delta_bic_2vs1 < -6:
+            interpretation = f'{best_k} cohorts (moderate evidence)'
+        elif delta_bic_2vs1 < -2:
+            interpretation = f'{best_k} cohorts (weak evidence)'
+        else:
+            interpretation = 'single cohort'
+
+        if best_k in gmm_models and best_k > 0:
+            best_gmm = gmm_models[best_k]
+
+            # Predict cohort assignments
+            cohort_labels = best_gmm.predict(X)
+            cohort_probs = best_gmm.predict_proba(X)
+
+            # Sort cohorts by mean length (smallest to largest)
+            means = best_gmm.means_.flatten()
+            sorted_indices = np.argsort(means)
+
+            # Remap cohort labels to be ordered by size
+            # Store assignments
+            for i, (length, cohort, prob_vec) in enumerate(zip(arr, cohort_labels_sorted, cohort_probs)):
+                max_prob = prob_vec.max()
+                all_cohort_assignments.append({
+                    'date': date,
+                    'larva_idx': i,
+                    'body_length_mm': length,
+                    'cohort_id': int(cohort),
+                    'cohort_probability': max_prob
+                })
+
+            # ── 3. Cohort Statistics ──────────────────────────────────��─────
+        row = gmm_results[gmm_results['date'] == date].iloc[0]
+        best_k = int(row['best_k'])
+                        'n_larvae': int(cohort_mask.sum()),
+                        'mean_length': float(cohort_mean),
+                        'median_length': float(np.median(cohort_lengths)),
+                        'std_dev': float(cohort_std),
+                        'cohort_proportion': float(cohort_weight),
+                        'min_length': float(cohort_lengths.min()),
+                        'max_length': float(cohort_lengths.max())
+                    })
+
+    # Create DataFrames
+    gmm_results = pd.DataFrame(gmm_results_rows)
+    cohort_assignments = pd.DataFrame(all_cohort_assignments)
+        # Fit and plot GMM
+
+    # Save tables
+    savecsv(gmm_results, 'gmm_model_selection.csv')
+    savecsv(cohort_assignments, 'cohort_assignments.csv')
+    savecsv(cohort_stats, 'cohort_statistics.csv')
+
+    print(f"  ✓ GMM fitting complete")
+    print(f"  ✓ {len(cohort_assignments)} larvae assigned to cohorts")
+    print(f"  ✓ {len(cohort_stats)} cohort-date combinations identified")
+
+    # ── 4. Visualization: GMM Distributions ─────────────────────────────────
+    print("\n  Creating visualizations...")
+
     n_dates = len(dates)
     n_cols = 3
     n_rows = (n_dates + n_cols - 1) // n_cols
 
-    # ── 2a KDE overlaid ──────────────────────────────────────────────────────
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(15, 4 * n_rows))
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(16, 4 * n_rows))
     axes = axes.flatten()
-    palette = plt.cm.tab10(np.linspace(0, 1, n_dates))
 
-    normality_rows = []
     for i, date in enumerate(dates):
+        ax = axes[i]
         arr = groups[date]
-        ax  = axes[i]
-        color = palette[i]
+        n = len(arr)
 
-        # KDE
-        kde_xs = np.linspace(arr.min() - 0.5, arr.max() + 0.5, 300)
+        row = gmm_results[gmm_results['date'] == date].iloc[0]
+        best_k = int(row['best_k'])
+
+        if n < 10 or np.isnan(row['bic_1']):
+            ax.text(0.5, 0.5, f'{date}\nn={n}\ninsufficient data',
+        delta_bic = row['delta_bic_2vs1']
+            ax.set_xticks([])
+            ax.set_yticks([])
+                f"{row['interpretation']}")
+
+        ax.set_xlabel('Body Length (mm)', fontsize=8)
+        ax.hist(arr, bins=25, density=True, alpha=0.4, color='gray',
+               edgecolor='black', label='Data')
+        ax.grid(alpha=0.3)
+
+        # Fit and plot GMM
+        X = arr.reshape(-1, 1)
+        try:
+    plt.suptitle('GMM Cohort Decomposition: Component Fits',
+                fontsize=14, fontweight='bold')
+                                 random_state=42, max_iter=300, n_init=5)
+    savefig('02c_gmm_cohort_distributions.png')
+
+    # ── 5. Visualization: Cohort Assignments ────────────────────────────────
+    if len(cohort_assignments) > 0:
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(16, 4 * n_rows))
+        axes = axes.flatten()
+
+        for i, date in enumerate(dates):
+            ax = axes[i]
+            date_data = cohort_assignments[cohort_assignments['date'] == date]
+
+            if len(date_data) == 0:
+                ax.text(0.5, 0.5, f'{date}\nNo cohorts',
+                       ha='center', va='center', transform=ax.transAxes)
+                ax.set_xticks([])
+                ax.set_yticks([])
+                continue
+
+            cohort_ids = sorted(date_data['cohort_id'].unique())
+            colors = ['blue', 'green', 'orange', 'purple']
+
+            for cid in cohort_ids:
+                cohort_data = date_data[date_data['cohort_id'] == cid]
+                lengths = cohort_data['body_length_mm'].values
+                x_pos = np.random.normal(cid, 0.05, size=len(lengths))
+
+                ax.scatter(x_pos, lengths, s=40, alpha=0.6,
+                          color=colors[cid % len(colors)],
+                          label=f'Cohort {cid} (n={len(lengths)})')
+
+            ax.set_xlabel('Cohort ID', fontsize=9)
+            ax.set_ylabel('Body Length (mm)', fontsize=9)
+            ax.set_title(f'{date}', fontsize=10, fontweight='bold')
+            ax.set_xticks(cohort_ids)
+            ax.legend(fontsize=7)
+            ax.grid(alpha=0.3, axis='y')
+
+        for j in range(i + 1, len(axes)):
+            axes[j].set_visible(False)
+            # Individual components
+        plt.suptitle('Cohort Assignments: Length by Cohort',
+                    fontsize=14, fontweight='bold')
+        plt.tight_layout()
+        savefig('02c_cohort_assignments.png')
+
+    # ── 6. Visualization: Cohort Growth Trajectories ────────────────────────
+    if len(cohort_stats) > 0:
+        fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+
+        # Panel A: All cohorts over time
+        ax = axes[0, 0]
+        for cohort_id in sorted(cohort_stats['cohort_id'].unique()):
+            cohort_data = cohort_stats[cohort_stats['cohort_id'] == cohort_id].copy()
+            cohort_data = cohort_data.sort_values('date', key=lambda x: x.map(date_key))
+
+            dates_list = cohort_data['date'].tolist()
+            means = cohort_data['mean_length'].tolist()
+
+            if len(dates_list) >= 2:
+                x_pos = [dates.index(d) for d in dates_list if d in dates]
+                colors_map = {0: 'blue', 1: 'green', 2: 'orange', 3: 'purple'}
+                ax.plot(x_pos, means, 'o-', lw=2, ms=8, alpha=0.8,
+                       color=colors_map.get(cohort_id, 'gray'),
+                       label=f'Cohort {cohort_id}')
+
+        ax.set_xticks(range(len(dates)))
+        ax.set_xticklabels(dates, rotation=45, ha='right')
+        ax.set_xlabel('Date', fontweight='bold')
+        ax.set_ylabel('Mean Body Length (mm)', fontweight='bold')
+        ax.set_title('Cohort-Specific Growth Trajectories', fontweight='bold')
+        ax.legend()
+        ax.grid(alpha=0.3)
+
+        # Panel B: Cohort proportions over time
+        ax = axes[0, 1]
+        pivot = cohort_stats.pivot_table(
+            index='date',
+            columns='cohort_id',
+            values='cohort_proportion',
+            fill_value=0
+        )
+        pivot = pivot.reindex(dates, fill_value=0)
+        ax.set_title(title, fontsize=9)
+        bottom = np.zeros(len(pivot))
+        colors_map = {0: 'blue', 1: 'green', 2: 'orange', 3: 'purple'}
+        for cid in pivot.columns:
+            ax.bar(range(len(pivot)), pivot[cid].values, bottom=bottom,
+                  label=f'Cohort {cid}', color=colors_map.get(cid, 'gray'),
+                  alpha=0.7, edgecolor='white')
+            bottom += pivot[cid].values
+
+        ax.set_xticks(range(len(dates)))
+        ax.set_xticklabels(dates, rotation=45, ha='right')
+        ax.set_xlabel('Date', fontweight='bold')
+        ax.set_ylabel('Cohort Proportion', fontweight='bold')
+        ax.set_title('Cohort Composition Over Time', fontweight='bold')
+        ax.legend()
+        ax.grid(alpha=0.3, axis='y')
+
+        # Panel C: Overall mean vs largest cohort mean
+        ax = axes[1, 0]
+        x_pos = np.arange(len(dates))
+        overall_means = ov.set_index('date').loc[dates, 'mean_mm'].values
+
+        ax.plot(x_pos, overall_means, 'o-', lw=2.5, ms=9,
+               color='black', label='Overall mean', zorder=5)
+
+        # Largest cohort per date
+        largest_cohort_means = []
+        for date in dates:
+            date_cohorts = cohort_stats[cohort_stats['date'] == date]
+            if len(date_cohorts) > 0:
+                largest = date_cohorts.loc[date_cohorts['n_larvae'].idxmax()]
+                largest_cohort_means.append(largest['mean_length'])
+            else:
+                largest_cohort_means.append(np.nan)
+
+        ax.plot(x_pos, largest_cohort_means, 's--', lw=2, ms=7,
+               color='blue', label='Largest cohort', alpha=0.8)
+
+        # Leading (highest mean) cohort per date
+        leading_cohort_means = []
+        for date in dates:
+            date_cohorts = cohort_stats[cohort_stats['date'] == date]
+            if len(date_cohorts) > 0:
+                leading = date_cohorts.loc[date_cohorts['mean_length'].idxmax()]
+                leading_cohort_means.append(leading['mean_length'])
+            else:
+                leading_cohort_means.append(np.nan)
+
+        ax.plot(x_pos, leading_cohort_means, '^--', lw=2, ms=7,
+               color='red', label='Leading cohort', alpha=0.8)
+
+        ax.set_xticks(x_pos)
+        ax.set_xticklabels(dates, rotation=45, ha='right')
+        ax.set_xlabel('Date', fontweight='bold')
+        ax.set_ylabel('Mean Body Length (mm)', fontweight='bold')
+        ax.set_title('Growth Comparison: Overall vs Cohort-Specific', fontweight='bold')
+        ax.legend()
+        ax.grid(alpha=0.3)
+
+        # Panel D: Model selection summary
+        ax = axes[1, 1]
+        cohort_counts = gmm_results['best_k'].value_counts().sort_index()
+        colors_bar = ['gray', 'blue', 'green', 'orange']
+
+        ax.bar(cohort_counts.index, cohort_counts.values,
+              color=[colors_bar[k] for k in cohort_counts.index],
+              alpha=0.7, edgecolor='black')
+        ax.set_xlabel('Number of Cohorts (k)', fontweight='bold')
+        ax.set_ylabel('Number of Dates', fontweight='bold')
+        ax.set_title('GMM Model Selection Summary', fontweight='bold')
+        ax.set_xticks([1, 2, 3])
+        ax.grid(alpha=0.3, axis='y')
+    plt.tight_layout()
+        plt.tight_layout()
+        savefig('02c_cohort_growth_trajectories.png')
+
+    # ── 7. Report Summary ───────────────────────────────────────────────────
+    R.h1("Step 2C – GMM Cohort Decomposition")
+    R.p("Objective: Identify and separate potential cohorts using Gaussian Mixture Models.")
+
+    n_dates_analyzed = len(gmm_results[gmm_results['n'] >= 10])
+    n_single_cohort = len(gmm_results[gmm_results['best_k'] == 1])
+    n_two_cohorts = len(gmm_results[gmm_results['best_k'] == 2])
+    n_three_cohorts = len(gmm_results[gmm_results['best_k'] == 3])
+
+    R.bullet(f"Dates analyzed: {n_dates_analyzed}/{len(dates)}")
+    R.bullet(f"Dates with 1 cohort: {n_single_cohort}")
+    R.bullet(f"Dates with 2 cohorts: {n_two_cohorts}")
+    R.bullet(f"Dates with 3 cohorts: {n_three_cohorts}")
+
+    if n_two_cohorts + n_three_cohorts > 0:
+        R.warn(f"MULTIPLE COHORTS DETECTED: {n_two_cohorts + n_three_cohorts} dates show evidence of cohort mixing.")
+
+        multi_cohort_dates = gmm_results[gmm_results['best_k'] > 1]['date'].tolist()
+        R.bullet(f"Dates with multiple cohorts: {', '.join(multi_cohort_dates)}")
+
+        # Report ΔBIC statistics
+        strong_evidence = gmm_results[gmm_results['delta_bic_2vs1'] < -10]
+        if len(strong_evidence) > 0:
+            R.warn(f"Strong evidence (ΔBIC < -10) for multiple cohorts on: {', '.join(strong_evidence['date'].tolist())}")
+    # ── 5. Visualization: Cohort Assignments ────────────────────────────────
+        R.p("")
+        R.p("BIOLOGICAL INTERPRETATION:")
+        R.p("• Multiple cohorts suggest staggered hatching events")
+        R.p("• Cohorts may represent different developmental stages")
+        R.p("• Mixed sampling from multiple age classes")
+
+        R.p("")
+        R.p("IMPLICATIONS FOR GROWTH ANALYSIS:")
+        R.p("• Overall mean conflates multiple cohort means")
+        R.p("• Non-monotonic patterns may reflect cohort composition shifts")
+        R.p("• Cohort-specific growth trajectories are more biologically meaningful")
+            date_data = cohort_assignments[cohort_assignments['date'] == date]
+        # Compare overall vs cohort-specific growth
+        if len(cohort_stats) > 0:
+            R.p("")
+            R.p("COHORT-SPECIFIC GROWTH:")
+
+            # Check if largest cohort shows cleaner growth
+            overall_means = ov.set_index('date').loc[dates, 'mean_mm'].values
+            largest_means = []
+            for date in dates:
+                date_cohorts = cohort_stats[cohort_stats['date'] == date]
+                if len(date_cohorts) > 0:
+                    largest = date_cohorts.loc[date_cohorts['n_larvae'].idxmax()]
+                    largest_means.append(largest['mean_length'])
+                else:
+                    largest_means.append(overall_means[dates.index(date)])
+
+            # Check monotonicity
+            overall_diffs = np.diff(overall_means)
+            largest_diffs = np.diff([m for m in largest_means if not np.isnan(m)])
+
+            overall_monotone = np.all(overall_diffs >= -0.01)
+            largest_monotone = np.all(largest_diffs >= -0.01)
+
+            if not overall_monotone and largest_monotone:
+                R.ok("Largest cohort shows MORE MONOTONIC growth than overall mean.")
+                R.p("This supports the hypothesis that non-monotonic patterns result from cohort mixing.")
+            elif overall_monotone:
+                R.p("Overall mean is already monotonic; cohort decomposition does not reveal hidden pattern.")
+            else:
+                R.p("Both overall and cohort-specific curves show non-monotonic behavior.")
+            cohort_ids = sorted(date_data['cohort_id'].unique())
+        R.ok("No strong evidence of multiple cohorts detected.")
+
+        R.p("Growth curve based on overall mean is appropriate.")
+            for cid in cohort_ids:
+    return gmm_results, cohort_assignments, cohort_stats
+
+            ax.set_xlabel('Cohort ID', fontsize=9)
+            ax.set_ylabel('Body Length (mm)', fontsize=9)
+            ax.set_title(f'{date}', fontsize=10, fontweight='bold')
+            ax.set_xticks(cohort_ids)
+            ax.legend(fontsize=7)
+            ax.grid(alpha=0.3, axis='y')
+
+        for j in range(i + 1, len(axes)):
+            axes[j].set_visible(False)
+
+        plt.suptitle('Cohort Assignments: Length by Cohort',
+                    fontsize=14, fontweight='bold')
+        plt.tight_layout()
+        savefig('02c_cohort_assignments.png')
+
+    # ── 6. Visualization: Cohort Growth Trajectories ────────────────────────
+    if len(cohort_stats) > 0:
+        fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+
+        # Panel A: All cohorts over time
+        ax = axes[0, 0]
+        for cohort_id in sorted(cohort_stats['cohort_id'].unique()):
+            cohort_data = cohort_stats[cohort_stats['cohort_id'] == cohort_id].copy()
+            cohort_data = cohort_data.sort_values('date', key=lambda x: x.map(date_key))
+
+            dates_list = cohort_data['date'].tolist()
+            means = cohort_data['mean_length'].tolist()
+
+            if len(dates_list) >= 2:
+                x_pos = [dates.index(d) for d in dates_list if d in dates]
+                colors_map = {0: 'blue', 1: 'green', 2: 'orange', 3: 'purple'}
+                ax.plot(x_pos, means, 'o-', lw=2, ms=8, alpha=0.8,
+                       color=colors_map.get(cohort_id, 'gray'),
+    # ── Report summary ───────────────────────────────────────────────────────
+        ax.set_xticks(range(len(dates)))
+        ax.set_xticklabels(dates, rotation=45, ha='right')
+        ax.set_xlabel('Date', fontweight='bold')
+        ax.set_ylabel('Mean Body Length (mm)', fontweight='bold')
+        ax.set_title('Cohort-Specific Growth Trajectories', fontweight='bold')
+        ax.legend()
+        ax.grid(alpha=0.3)
+
+        # Panel B: Cohort proportions over time
+        ax = axes[0, 1]
+        pivot = cohort_stats.pivot_table(
+            index='date',
+            columns='cohort_id',
+            values='cohort_proportion',
+            fill_value=0
+        )
+        pivot = pivot.reindex(dates, fill_value=0)
+
+        bottom = np.zeros(len(pivot))
+        colors_map = {0: 'blue', 1: 'green', 2: 'orange', 3: 'purple'}
+        for cid in pivot.columns:
+            ax.bar(range(len(pivot)), pivot[cid].values, bottom=bottom,
+                  label=f'Cohort {cid}', color=colors_map.get(cid, 'gray'),
+                  alpha=0.7, edgecolor='white')
+            bottom += pivot[cid].values
+
+        ax.set_xticks(range(len(dates)))
+        ax.set_xticklabels(dates, rotation=45, ha='right')
+        ax.set_xlabel('Date', fontweight='bold')
+        ax.set_ylabel('Cohort Proportion', fontweight='bold')
+        ax.set_title('Cohort Composition Over Time', fontweight='bold')
+        ax.legend()
+        ax.grid(alpha=0.3, axis='y')
+
+        # Panel C: Overall mean vs largest cohort mean
+        ax = axes[1, 0]
+        x_pos = np.arange(len(dates))
+        overall_means = ov.set_index('date').loc[dates, 'mean_mm'].values
+
+        ax.plot(x_pos, overall_means, 'o-', lw=2.5, ms=9,
+               color='black', label='Overall mean', zorder=5)
+
+        # Largest cohort per date
+        largest_cohort_means = []
+        for date in dates:
+            date_cohorts = cohort_stats[cohort_stats['date'] == date]
+            if len(date_cohorts) > 0:
+                largest = date_cohorts.loc[date_cohorts['n_larvae'].idxmax()]
+                largest_cohort_means.append(largest['mean_length'])
+            else:
+                largest_cohort_means.append(np.nan)
+
+        ax.plot(x_pos, largest_cohort_means, 's--', lw=2, ms=7,
+               color='blue', label='Largest cohort', alpha=0.8)
+
+        # Leading (highest mean) cohort per date
+        leading_cohort_means = []
+        for date in dates:
+            date_cohorts = cohort_stats[cohort_stats['date'] == date]
+            if len(date_cohorts) > 0:
+                leading = date_cohorts.loc[date_cohorts['mean_length'].idxmax()]
+                leading_cohort_means.append(leading['mean_length'])
+            else:
+                leading_cohort_means.append(np.nan)
+
+        ax.plot(x_pos, leading_cohort_means, '^--', lw=2, ms=7,
+               color='red', label='Leading cohort', alpha=0.8)
+
+        ax.set_xticks(x_pos)
+        ax.set_xticklabels(dates, rotation=45, ha='right')
+        ax.set_xlabel('Date', fontweight='bold')
+        ax.set_ylabel('Mean Body Length (mm)', fontweight='bold')
+        ax.set_title('Growth Comparison: Overall vs Cohort-Specific', fontweight='bold')
+        ax.legend()
+        ax.grid(alpha=0.3)
+
+        # Panel D: Model selection summary
+        ax = axes[1, 1]
+        cohort_counts = gmm_results['best_k'].value_counts().sort_index()
+        colors_bar = ['gray', 'blue', 'green', 'orange']
+
+        ax.bar(cohort_counts.index, cohort_counts.values,
+              color=[colors_bar[k] for k in cohort_counts.index],
+              alpha=0.7, edgecolor='black')
+        ax.set_xlabel('Number of Cohorts (k)', fontweight='bold')
+        ax.set_ylabel('Number of Dates', fontweight='bold')
+        ax.set_title('GMM Model Selection Summary', fontweight='bold')
+        ax.set_xticks([1, 2, 3])
+        ax.grid(alpha=0.3, axis='y')
+
+        plt.tight_layout()
+        savefig('02c_cohort_growth_trajectories.png')
+
+    # ── 7. Report Summary ───────────────────────────────────────────────────
+    R.h1("Step 2C – GMM Cohort Decomposition")
+    R.p("Objective: Identify and separate potential cohorts using Gaussian Mixture Models.")
+
+    n_dates_analyzed = len(gmm_results[gmm_results['n'] >= 10])
+    n_single_cohort = len(gmm_results[gmm_results['best_k'] == 1])
+    n_two_cohorts = len(gmm_results[gmm_results['best_k'] == 2])
+    n_three_cohorts = len(gmm_results[gmm_results['best_k'] == 3])
+
+    R.bullet(f"Dates analyzed: {n_dates_analyzed}/{len(dates)}")
+    R.bullet(f"Dates with 1 cohort: {n_single_cohort}")
+    R.bullet(f"Dates with 2 cohorts: {n_two_cohorts}")
+    R.bullet(f"Dates with 3 cohorts: {n_three_cohorts}")
+
+    if n_two_cohorts + n_three_cohorts > 0:
+        R.warn(f"MULTIPLE COHORTS DETECTED: {n_two_cohorts + n_three_cohorts} dates show evidence of cohort mixing.")
+
+        multi_cohort_dates = gmm_results[gmm_results['best_k'] > 1]['date'].tolist()
+        R.bullet(f"Dates with multiple cohorts: {', '.join(multi_cohort_dates)}")
+
+        # Report ΔBIC statistics
+        strong_evidence = gmm_results[gmm_results['delta_bic_2vs1'] < -10]
+        if len(strong_evidence) > 0:
+            R.warn(f"Strong evidence (ΔBIC < -10) for multiple cohorts on: {', '.join(strong_evidence['date'].tolist())}")
+
+        R.p("")
+        R.p("BIOLOGICAL INTERPRETATION:")
+        R.p("• Multiple cohorts suggest staggered hatching events")
+        R.p("• Cohorts may represent different developmental stages")
+        R.p("• Mixed sampling from multiple age classes")
+
+        R.p("")
+        R.p("IMPLICATIONS FOR GROWTH ANALYSIS:")
+        R.p("• Overall mean conflates multiple cohort means")
+        R.p("• Non-monotonic patterns may reflect cohort composition shifts")
+        R.p("• Cohort-specific growth trajectories are more biologically meaningful")
+
+        # Compare overall vs cohort-specific growth
+        if len(cohort_stats) > 0:
+            R.p("")
+            R.p("COHORT-SPECIFIC GROWTH:")
+
+            # Check if largest cohort shows cleaner growth
+            overall_means = ov.set_index('date').loc[dates, 'mean_mm'].values
+            largest_means = []
+            for date in dates:
+                date_cohorts = cohort_stats[cohort_stats['date'] == date]
+                if len(date_cohorts) > 0:
+                    largest = date_cohorts.loc[date_cohorts['n_larvae'].idxmax()]
+                    largest_means.append(largest['mean_length'])
+                else:
+                    largest_means.append(overall_means[dates.index(date)])
+
+            # Check monotonicity
+            overall_diffs = np.diff(overall_means)
+            largest_diffs = np.diff([m for m in largest_means if not np.isnan(m)])
+
+            overall_monotone = np.all(overall_diffs >= -0.01)
+            largest_monotone = np.all(largest_diffs >= -0.01)
+
+            if not overall_monotone and largest_monotone:
+                R.ok("Largest cohort shows MORE MONOTONIC growth than overall mean.")
+                R.p("This supports the hypothesis that non-monotonic patterns result from cohort mixing.")
+            elif overall_monotone:
+                R.p("Overall mean is already monotonic; cohort decomposition does not reveal hidden pattern.")
+            else:
+                R.p("Both overall and cohort-specific curves show non-monotonic behavior.")
+    else:
+        R.ok("No strong evidence of multiple cohorts detected.")
+        R.p("Daily distributions are generally consistent with single populations.")
+        R.p("Growth curve based on overall mean is appropriate.")
+
+    return gmm_results, cohort_assignments, cohort_stats
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  STEP 2D – KDE-BASED COHORT DECOMPOSITION (NON-GAUSSIAN)
+# ─────────────────────────────────────────────────────────────────────────────
+def step2d_kde_cohort_decomposition(groups: dict):
+    """
+    Decompose body length distributions into cohorts using KDE peak detection.
+
+    This is a non-parametric alternative to GMM that doesn't assume Gaussian
+    distributions. Cohorts are identified by local maxima in the KDE curve,
+    and boundaries are determined by local minima between peaks.
+
+    Args:
+        groups: dict mapping date -> body_length_mm array
+
+    Returns:
+        kde_cohort_stats: DataFrame with per-cohort statistics
+    """
+    print("\n" + "=" * 70)
+    print("STEP 2D — KDE-BASED COHORT DECOMPOSITION (NON-GAUSSIAN)")
+    print("=" * 70)
+
+    dates = list(groups.keys())
+
+    all_cohort_stats = []
+    cohort_counts = []
+    peak_separations = []
+
+    # ── Analysis per date ────────────────────────────────────────────────────
+    for date in dates:
+        arr = groups[date]
+        n = len(arr)
+
+    # ── Report summary ───────────────────────────────────────────────────────
+            print(f"  {date}: n={n} (too few for KDE decomposition)")
+            continue
+
+        print(f"  {date}: n={n}", end="")
+
+        # ── 1. KDE Estimation ────────────────────────────────────────────────
+        try:
+            # Use scipy's gaussian_kde with Scott's rule
+            kde = stats.gaussian_kde(arr, bw_method='scott')
+
+            # Evaluate on dense grid
+            x_min, x_max = arr.min() - 0.5, arr.max() + 0.5
+            x_eval = np.linspace(x_min, x_max, 500)
+            kde_vals = kde(x_eval)
+
+            # ── 2. Peak Detection ────────────────────────────────────────────
+            # Find local maxima (peaks)
+            peaks, properties = find_peaks(kde_vals, prominence=0.05 * kde_vals.max())
+
+            # Limit to top 3 peaks by prominence
+            if len(peaks) > 3:
+                prominences = properties['prominences']
+                top_3_idx = np.argsort(prominences)[-3:]
+                peaks = peaks[top_3_idx]
+                peaks = np.sort(peaks)  # Keep sorted by position
+
+            n_peaks = len(peaks)
+            print(f" → {n_peaks} peak(s) detected", end="")
+
+            if n_peaks == 0:
+                # No peaks detected - treat as single cohort
+                all_cohort_stats.append({
+                    'date': date,
+                    'cohort_id': 0,
+                    'n_larvae': n,
+                    'mean_length': np.mean(arr),
+                    'median_length': np.median(arr),
+                    'std_length': np.std(arr, ddof=1),
+                    'cohort_weight': 1.0,
+                    'min_length': arr.min(),
+                    'max_length': arr.max()
+                })
+
+                cohort_counts.append({'date': date, 'n_cohorts': 1})
+                print()
+                continue
+
+            # ── 3. Find Boundaries Between Peaks ────────────────────────────
+            peak_positions = x_eval[peaks]
+
+                    boundaries.append(boundary)
+            # ── 4. Assign Larvae to Cohorts ─────────────────────────────────
+                cohort_lengths = arr[cohort_mask]
+
+                        'date': date,
+                        'cohort_id': cohort_id,
+                        'n_larvae': len(cohort_lengths),
+                        'mean_length': np.mean(cohort_lengths),
+                        'median_length': np.median(cohort_lengths),
+                        'std_length': np.std(cohort_lengths, ddof=1) if len(cohort_lengths) > 1 else 0.0,
+                        'cohort_weight': len(cohort_lengths) / n,
+                        'min_length': cohort_lengths.min(),
+                        'max_length': cohort_lengths.max()
+                    })
+
+            cohort_counts.append({'date': date, 'n_cohorts': len(boundaries) - 1})
+            print()
+
+        except Exception as e:
+            print(f" → KDE failed: {e}")
+            # Fallback: single cohort
+            all_cohort_stats.append({
+                'date': date,
+                'cohort_id': 0,
+                'n_larvae': n,
+                'mean_length': np.mean(arr),
+                'median_length': np.median(arr),
+                'std_length': np.std(arr, ddof=1),
+                'cohort_weight': 1.0,
+                'min_length': arr.min(),
+                'max_length': arr.max()
+            })
+            cohort_counts.append({'date': date, 'n_cohorts': 1})
+
+    # Create DataFrames
+    kde_cohort_stats = pd.DataFrame(all_cohort_stats)
+    cohort_count_df = pd.DataFrame(cohort_counts)
+
+    # Save tables
+    savecsv(kde_cohort_stats, 'kde_cohort_statistics.csv')
+
+    print(f"\n  ✓ KDE cohort decomposition complete")
+    print(f"  ✓ {len(kde_cohort_stats)} cohort-date combinations identified")
+
+    # ── Visualization ────────────────────────────────────────────────────────
+    print("\n  Creating visualizations...")
+
+    n_dates = len(dates)
+    n_cols = 3
+    n_rows = (n_dates + n_cols - 1) // n_cols
+
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(16, 4 * n_rows))
+    axes = axes.flatten()
+
+    for i, date in enumerate(dates):
+        ax = axes[i]
+        arr = groups[date]
+        n = len(arr)
+
+        if n < 10:
+            ax.text(0.5, 0.5, f'{date}\nn={n}\ninsufficient data',
+                   ha='center', va='center', transform=ax.transAxes)
+            ax.set_xticks([])
+            ax.set_yticks([])
+            continue
+
+        # Plot histogram
+        ax.hist(arr, bins=30, density=True, alpha=0.4, color='gray',
+               edgecolor='black', label='Data')
+
+        # Plot KDE
         try:
             kde = stats.gaussian_kde(arr, bw_method='scott')
-            ax.plot(kde_xs, kde(kde_xs), color=color, lw=2)
-        except Exception:
-            pass
-        ax.hist(arr, bins=25, density=True, alpha=0.35, color=color)
-        ax.axvline(np.mean(arr), color='red', ls='--', lw=1.5, label='mean')
-        ax.axvline(np.median(arr), color='navy', ls=':', lw=1.5, label='median')
-
-        # Normality tests
-        if len(arr) >= 8:
-            _, p_sw  = shapiro(arr) if len(arr) <= 5000 else (0, np.nan)
-            _, p_da  = normaltest(arr)
-            normal_label = (
-                "Normal?" +
-                (f" Shapiro p={p_sw:.3f}" if not np.isnan(p_sw) else "") +
-                f" D'Agostino p={p_da:.3f}"
-            )
-        else:
-            p_sw, p_da = np.nan, np.nan
-            normal_label = "n too small"
-
-        ax.set_title(f"{date}  n={len(arr)}\n{normal_label}", fontsize=9)
-        ax.set_xlabel("Length (mm)")
-        ax.legend(fontsize=7)
-
-        normality_rows.append({
-            'date': date, 'n': len(arr),
-            'shapiro_p': p_sw, 'dagostino_p': p_da,
-            'normal_shapiro': (p_sw > ALPHA) if not np.isnan(p_sw) else None,
-            'normal_dagostino': (p_da > ALPHA) if not np.isnan(p_da) else None,
-        })
-
-    for j in range(i + 1, len(axes)):
-        axes[j].set_visible(False)
-
-    plt.suptitle("Body Length Distributions per Date (KDE + histogram)", fontsize=13)
-    plt.tight_layout()
-    savefig("01_distributions_per_date.png")
-
-    # ── 2b Q-Q plots ─────────────────────────────────────────────────────────
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(15, 4 * n_rows))
-    axes = axes.flatten()
-    for i, date in enumerate(dates):
-        ax = axes[i]
-        arr = groups[date]
-        (osm, osr), (slope, intercept, r) = stats.probplot(arr, dist='norm')
-        ax.plot(osm, osr, 'o', markersize=3, alpha=0.6, color=palette[i])
-        ax.plot(osm, slope * np.array(osm) + intercept, 'r-', lw=1.5)
-        ax.set_title(f"{date}  R²={r**2:.3f}", fontsize=9)
-        ax.set_xlabel("Theoretical quantiles")
-        ax.set_ylabel("Sample quantiles")
-    for j in range(i + 1, len(axes)):
-        axes[j].set_visible(False)
-    plt.suptitle("Q-Q Plots (Normal) per Date", fontsize=13)
-    plt.tight_layout()
-    savefig("02_qq_plots.png")
-
-    norm_df = pd.DataFrame(normality_rows)
-    savecsv(norm_df, 'normality_tests.csv')
-
-    R.h1("Step 2 – Distribution Shapes")
-    n_normal_sw = norm_df['normal_shapiro'].sum(skipna=True)
-    n_normal_da = norm_df['normal_dagostino'].sum(skipna=True)
-    total = len(norm_df)
-    R.bullet(f"Shapiro-Wilk: {int(n_normal_sw)}/{total} dates consistent with normality (p>{ALPHA})")
-    R.bullet(f"D'Agostino:   {int(n_normal_da)}/{total} dates consistent with normality (p>{ALPHA})")
-    if n_normal_da < total * 0.6:
-        R.warn("Majority of dates FAIL normality — non-parametric tests should be preferred.")
-    else:
-        R.ok("Most dates are approximately normal — parametric tests are broadly applicable.")
-
-    return norm_df
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  STEP 3 – OUTLIER AUDIT
-# ─────────────────────────────────────────────────────────────────────────────
-def step3_outliers(groups: dict) -> pd.DataFrame:
-    print("\n" + "=" * 70)
-    print("STEP 3 — OUTLIER AUDIT")
-    print("=" * 70)
-
-    rows = []
-    fig, axes = plt.subplots(2, (len(groups) + 1) // 2, figsize=(16, 8))
-    axes = axes.flatten()
-
-    for i, (date, arr) in enumerate(groups.items()):
-        q1, q3 = np.percentile(arr, [25, 75])
-        iqr     = q3 - q1
-        lo, hi  = q1 - 3 * iqr, q3 + 3 * iqr   # extreme fence
-        z_scores = np.abs(stats.zscore(arr))
-
-        n_iqr   = int(np.sum((arr < lo) | (arr > hi)))
-        n_z3    = int(np.sum(z_scores > 3))
-        pct_out = 100 * max(n_iqr, n_z3) / len(arr)
-
-        rows.append({
-            'date': date, 'n': len(arr),
-            'outliers_iqr_extreme': n_iqr,
-            'outliers_z3': n_z3,
-            'outlier_pct': pct_out,
-            'max_z': float(z_scores.max()),
-        })
-
-        ax = axes[i]
-        ax.boxplot(arr, vert=True, patch_artist=True,
-                   boxprops=dict(facecolor='#aec6cf', alpha=0.7),
-                   flierprops=dict(marker='o', color='red', markersize=4))
-        ax.set_title(f"{date}\nn={len(arr)}  out={n_iqr}", fontsize=9)
-        ax.set_ylabel("Length (mm)")
-
-    for j in range(i + 1, len(axes)):
-        axes[j].set_visible(False)
-
-    plt.suptitle("Boxplots per Date (red = extreme outliers, 3×IQR fence)", fontsize=12)
-    plt.tight_layout()
-    savefig("03_boxplots_outliers.png")
-
-    out_df = pd.DataFrame(rows)
-    savecsv(out_df, 'outlier_audit.csv')
-
-    R.h1("Step 3 – Outlier Audit")
-    for _, row in out_df.iterrows():
-        if row['outlier_pct'] > 5:
-            R.warn(f"{row['date']}: {row['outlier_pct']:.1f}% extreme outliers "
-                   f"(IQR method) — max Z={row['max_z']:.2f}")
-        else:
-            R.ok(f"{row['date']}: {row['outlier_pct']:.1f}% extreme outliers — max Z={row['max_z']:.2f}")
-
-    return out_df
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  STEP 4 – ESTIMATOR COMPARISON
-# ─────────────────────────────────────────────────────────────────────────────
-def step4_estimators(groups: dict, ov: pd.DataFrame):
-    print("\n" + "=" * 70)
-    print("STEP 4 — ESTIMATOR COMPARISON")
-    print("=" * 70)
-
-    dates  = list(groups.keys())
-    x      = np.arange(len(dates))
-
-    means   = ov.set_index('date').loc[dates, 'mean_mm'].values
-    medians = ov.set_index('date').loc[dates, 'median_mm'].values
-    tms     = ov.set_index('date').loc[dates, 'trimmed_mean'].values
-
-    fig, ax = plt.subplots(figsize=(12, 5))
-    ax.plot(x, means,   'o-',  color='steelblue', lw=2, markersize=8, label='Mean')
-    ax.plot(x, medians, 's--', color='tomato',    lw=2, markersize=8, label='Median')
-    ax.plot(x, tms,     '^:',  color='green',     lw=2, markersize=8, label=f'Trimmed mean ({int(TRIM_FRAC*100)}%)')
-
-    ax.set_xticks(x)
-    ax.set_xticklabels(dates, rotation=45, ha='right')
-    ax.set_xlabel('Date')
-    ax.set_ylabel('Body Length (mm)')
-    ax.set_title('Central Tendency Estimators per Date')
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-    plt.tight_layout()
-    savefig("04_estimator_comparison.png")
-
-    # Relative deviation of median from mean
-    dev = np.abs(means - medians) / means * 100
-    max_dev_date = dates[int(np.argmax(dev))]
-
-    R.h1("Step 4 – Estimator Comparison")
-    R.bullet(f"Max deviation mean vs median: {dev.max():.1f}% on {max_dev_date}")
-    if dev.max() > 10:
-        R.warn("Large mean–median gap suggests skewed distribution or impactful outliers.")
-        R.warn("Median may be a more robust daily summary than mean.")
-    else:
-        R.ok("Mean and median track closely — mean is a reasonable estimator.")
-    R.bullet(f"Mean absolute deviation across dates: {dev.mean():.1f}%")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  STEP 5 – BOOTSTRAP CONFIDENCE INTERVALS (BCa)
-# ─────────────────────────────────────────────────────────────────────────────
-def _bca_ci(arr: np.ndarray, stat_fn, n_boot: int = BOOTSTRAP_N,
-            alpha: float = ALPHA) -> tuple[float, float]:
-    """Bias-corrected and accelerated bootstrap CI."""
-    rng      = np.random.default_rng(42)
-    observed = stat_fn(arr)
-    boot_stats = np.array([stat_fn(rng.choice(arr, size=len(arr), replace=True))
-                            for _ in range(n_boot)])
-    # Bias correction
-    z0 = stats.norm.ppf(np.mean(boot_stats < observed))
-    # Acceleration (jackknife)
-    jack = np.array([stat_fn(np.delete(arr, j)) for j in range(min(len(arr), 200))])
-    jack_mean = jack.mean()
-    num  = np.sum((jack_mean - jack) ** 3)
-    den  = 6 * (np.sum((jack_mean - jack) ** 2) ** 1.5)
-    a    = num / den if den != 0 else 0.0
-
-    z_alpha    = stats.norm.ppf(alpha / 2)
-    z_1_alpha  = stats.norm.ppf(1 - alpha / 2)
-
-    pct_lo = stats.norm.cdf(z0 + (z0 + z_alpha)  / (1 - a * (z0 + z_alpha)))
-    pct_hi = stats.norm.cdf(z0 + (z0 + z_1_alpha) / (1 - a * (z0 + z_1_alpha)))
-
-    lo = np.percentile(boot_stats, 100 * pct_lo)
-    hi = np.percentile(boot_stats, 100 * pct_hi)
-    return float(lo), float(hi)
-
-
-def step5_bootstrap(groups: dict) -> pd.DataFrame:
-    print("\n" + "=" * 70)
-    print("STEP 5 — BOOTSTRAP CONFIDENCE INTERVALS")
-    print("=" * 70)
-
-    dates = list(groups.keys())
-    rows  = []
-    for date in dates:
-        arr  = groups[date]
-        m    = np.mean(arr)
-        med  = np.median(arr)
-        ci_mean_lo, ci_mean_hi   = _bca_ci(arr, np.mean)
-        ci_med_lo,  ci_med_hi    = _bca_ci(arr, np.median)
-        rows.append({
-            'date': date, 'n': len(arr),
-            'mean': m, 'ci_mean_lo': ci_mean_lo, 'ci_mean_hi': ci_mean_hi,
-            'median': med, 'ci_med_lo': ci_med_lo, 'ci_med_hi': ci_med_hi,
-            'ci_mean_width': ci_mean_hi - ci_mean_lo,
-            'ci_med_width':  ci_med_hi  - ci_med_lo,
-        })
-        print(f"  {date}: mean {m:.3f} [{ci_mean_lo:.3f}, {ci_mean_hi:.3f}]  "
-              f"median {med:.3f} [{ci_med_lo:.3f}, {ci_med_hi:.3f}]")
-
-    boot_df = pd.DataFrame(rows)
-    savecsv(boot_df, 'bootstrap_ci.csv')
-
-    x = np.arange(len(dates))
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 9), sharex=True)
-
-    mean_lo_err = np.clip(boot_df['mean'].values - boot_df['ci_mean_lo'].values, 0, None)
-    mean_hi_err = np.clip(boot_df['ci_mean_hi'].values - boot_df['mean'].values, 0, None)
-    ax1.errorbar(x, boot_df['mean'],
-                 yerr=[mean_lo_err, mean_hi_err],
-                 fmt='o-', capsize=6, color='steelblue', lw=2, markersize=8, label='Mean ± 95% BCa CI')
-    ax1.set_ylabel('Body Length (mm)')
-    ax1.set_title(f'Bootstrap BCa 95% CI — Mean  (n_boot={BOOTSTRAP_N})')
-    ax1.legend(); ax1.grid(True, alpha=0.3)
-
-    med_lo_err = np.clip(boot_df['median'].values - boot_df['ci_med_lo'].values, 0, None)
-    med_hi_err = np.clip(boot_df['ci_med_hi'].values - boot_df['median'].values, 0, None)
-    ax2.errorbar(x, boot_df['median'],
-                 yerr=[med_lo_err, med_hi_err],
-                 fmt='s--', capsize=6, color='tomato', lw=2, markersize=8, label='Median ± 95% BCa CI')
-    ax2.set_xticks(x); ax2.set_xticklabels(dates, rotation=45, ha='right')
-    ax2.set_ylabel('Body Length (mm)')
-    ax2.set_title(f'Bootstrap BCa 95% CI — Median  (n_boot={BOOTSTRAP_N})')
-    ax2.legend(); ax2.grid(True, alpha=0.3)
-
-    plt.tight_layout()
-    savefig("05_bootstrap_ci.png")
-
-    R.h1("Step 5 – Bootstrap Confidence Intervals (BCa)")
-    overlapping = 0
-    for i in range(1, len(rows)):
-        prev, curr = rows[i-1], rows[i]
-        # Check if mean CIs overlap
-        if prev['ci_mean_hi'] >= curr['ci_mean_lo']:
-            overlapping += 1
-            R.warn(f"CIs overlap between {prev['date']} and {curr['date']} — "
-                   f"difference may NOT be significant.")
-        else:
-            R.ok(f"CIs non-overlapping: {prev['date']} [{prev['ci_mean_lo']:.2f},{prev['ci_mean_hi']:.2f}] "
-                 f"→ {curr['date']} [{curr['ci_mean_lo']:.2f},{curr['ci_mean_hi']:.2f}]")
-
-    R.bullet(f"{overlapping}/{len(rows)-1} adjacent-day CI pairs overlap (potential non-significance)")
-    return boot_df
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  STEP 6 – HETEROSCEDASTICITY
-# ─────────────────────────────────────────────────────────────────────────────
-def step6_heteroscedasticity(groups: dict):
-    print("\n" + "=" * 70)
-    print("STEP 6 — HETEROSCEDASTICITY")
-    print("=" * 70)
-
-    arrays = list(groups.values())
-    dates  = list(groups.keys())
-
-    lev_stat, lev_p    = levene(*arrays, center='mean')
-    bf_stat,  bf_p     = levene(*arrays, center='median')   # Brown-Forsythe
-    try:
-        bar_stat, bar_p = bartlett(*arrays)
-    except Exception:
-        bar_stat, bar_p = np.nan, np.nan
-
-    stds = [np.std(a, ddof=1) for a in arrays]
-    ns   = [len(a) for a in arrays]
-
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 5))
-
-    ax1.bar(dates, stds, color='slateblue', edgecolor='white', alpha=0.8)
-    ax1.set_title("Within-Date Standard Deviation")
-    ax1.set_xlabel("Date"); ax1.set_ylabel("Std (mm)")
-    ax1.tick_params(axis='x', rotation=45)
-    ax1.grid(True, alpha=0.3, axis='y')
-
-    ax2.scatter(ns, stds, color='tomato', s=80, zorder=3)
-    for i, (n, s, d) in enumerate(zip(ns, stds, dates)):
-        ax2.annotate(d, (n, s), textcoords='offset points',
-                     xytext=(5, 2), fontsize=8)
-    slope, intercept, r_val, p_val, _ = stats.linregress(ns, stds)
-    xs = np.linspace(min(ns), max(ns), 100)
-    ax2.plot(xs, slope * xs + intercept, 'k--', lw=1.5,
-             label=f'Std ~ n  r={r_val:.3f} p={p_val:.3f}')
-    ax2.set_title("Std vs Sample Size (size–variance relationship)")
-    ax2.set_xlabel("n"); ax2.set_ylabel("Std (mm)")
-    ax2.legend(); ax2.grid(True, alpha=0.3)
-
-    plt.tight_layout()
-    savefig("06_heteroscedasticity.png")
-
-    R.h1("Step 6 – Heteroscedasticity")
-    R.bullet(f"Levene's test (equal variances):  stat={lev_stat:.3f}  p={lev_p:.4f}")
-    R.bullet(f"Brown-Forsythe test:              stat={bf_stat:.3f}  p={bf_p:.4f}")
-    if not np.isnan(bar_p):
-        R.bullet(f"Bartlett's test:                  stat={bar_stat:.3f}  p={bar_p:.4f}")
-
-    if lev_p < ALPHA:
-        R.warn("Variances are NOT equal across dates (heteroscedastic). "
-               "Welch-corrected tests required; pooled tests may be unreliable.")
-    else:
-        R.ok(f"Levene p={lev_p:.4f} — variances are approximately equal (homoscedastic).")
-
-    r_std_n, p_std_n = stats.spearmanr(ns, stds)
-    if p_std_n < ALPHA:
-        R.warn(f"Std correlates with n (r={r_std_n:.3f}, p={p_std_n:.4f}) — "
-               "larger samples also show more variance (or vice versa).")
-    else:
-        R.ok(f"No significant correlation between std and n (r={r_std_n:.3f}, p={p_std_n:.4f}).")
-
-    return {'levene_p': lev_p, 'bf_p': bf_p, 'bartlett_p': bar_p}
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  STEP 7 – PAIRWISE EFFECT SIZES (adjacent days)
-# ─────────────────────────────────────────────────────────────────────────────
-def cohens_d(a, b):
-    na, nb = len(a), len(b)
-    pooled = np.sqrt(((na - 1) * np.std(a, ddof=1)**2 + (nb - 1) * np.std(b, ddof=1)**2) / (na + nb - 2))
-    return (np.mean(a) - np.mean(b)) / pooled if pooled > 0 else 0.0
-
-
-def rank_biserial(a, b):
-    """Rank-biserial correlation for Mann-Whitney U."""
-    U, _ = mannwhitneyu(a, b, alternative='two-sided')
-    return float(1 - 2 * U / (len(a) * len(b)))
-
-
-def step7_effect_sizes(groups: dict) -> pd.DataFrame:
-    print("\n" + "=" * 70)
-    print("STEP 7 — PAIRWISE EFFECT SIZES (ADJACENT DAYS)")
-    print("=" * 70)
-
-    dates = list(groups.keys())
-    rows  = []
-
-    for i in range(1, len(dates)):
-        d1, d2 = dates[i-1], dates[i]
-        a, b   = groups[d1], groups[d2]
-        d      = cohens_d(a, b)
-        r      = rank_biserial(a, b)
-        _, p_mw = mannwhitneyu(a, b, alternative='two-sided')
-        _, p_t  = ttest_ind(a, b, equal_var=False)  # Welch
-        delta   = np.mean(b) - np.mean(a)
-
-        label = 'negligible'
-        if abs(d) >= 0.8:   label = 'large'
-        elif abs(d) >= 0.5: label = 'medium'
-        elif abs(d) >= 0.2: label = 'small'
-
-        rows.append({
-            'from_date': d1, 'to_date': d2,
-            'mean_delta_mm': delta,
-            'cohens_d': d, 'effect_magnitude': label,
-            'rank_biserial_r': r,
-            'mannwhitney_p': p_mw,
-            'welch_t_p': p_t,
-            'significant_mw': p_mw < ALPHA,
-        })
-        print(f"  {d1}→{d2}: Δ={delta:+.3f}mm  d={d:.3f}({label})  "
-              f"p_mw={p_mw:.4f}  p_t={p_t:.4f}")
-
-    eff_df = pd.DataFrame(rows)
-    savecsv(eff_df, 'effect_sizes_adjacent.csv')
-
-    # Figure: effect size bar chart
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 9))
-
-    labels   = [f"{r['from_date']}→\n{r['to_date']}" for _, r in eff_df.iterrows()]
-    cohens   = eff_df['cohens_d'].values
-    sig_mask = eff_df['significant_mw'].values
-
-    bar_colors = ['#e74c3c' if s else '#95a5a6' for s in sig_mask]
-    ax1.bar(range(len(labels)), np.abs(cohens), color=bar_colors, edgecolor='white')
-    ax1.axhline(0.2, ls='--', color='gray', lw=1.2, label='small (0.2)')
-    ax1.axhline(0.5, ls='--', color='orange', lw=1.2, label='medium (0.5)')
-    ax1.axhline(0.8, ls='--', color='red', lw=1.2, label='large (0.8)')
-    ax1.set_xticks(range(len(labels))); ax1.set_xticklabels(labels, fontsize=9)
-    ax1.set_ylabel("|Cohen's d|")
-    ax1.set_title("Effect Size (Cohen's d) — Adjacent Day Pairs\nRed bars = Mann-Whitney p < 0.05")
-    ax1.legend(fontsize=8); ax1.grid(True, alpha=0.3, axis='y')
-
-    deltas = eff_df['mean_delta_mm'].values
-    ax2.bar(range(len(labels)), deltas,
-            color=['#27ae60' if d > 0 else '#e74c3c' for d in deltas],
-            edgecolor='white')
-    ax2.axhline(0, color='black', lw=1)
-    ax2.set_xticks(range(len(labels))); ax2.set_xticklabels(labels, fontsize=9)
-    ax2.set_ylabel('Δ Mean (mm)')
-    ax2.set_title('Daily Mean Increment — Green = growth, Red = decline')
-    ax2.grid(True, alpha=0.3, axis='y')
-
-    plt.tight_layout()
-    savefig("07_effect_sizes_adjacent.png")
-
-    R.h1("Step 7 – Pairwise Effect Sizes (Adjacent Days)")
-    n_sig    = eff_df['significant_mw'].sum()
-    n_large  = (eff_df['cohens_d'].abs() >= 0.8).sum()
-    n_neg    = (eff_df['mean_delta_mm'] < 0).sum()
-    R.bullet(f"{n_sig}/{len(eff_df)} adjacent pairs are statistically significant (MW p<{ALPHA})")
-    R.bullet(f"{n_large}/{len(eff_df)} pairs show large effect size (|d|≥0.8)")
-    if n_neg > 0:
-        R.warn(f"{n_neg} day-pair(s) show NEGATIVE growth (mean decline) — non-monotonic pattern detected.")
-    else:
-        R.ok("All adjacent-day mean differences are positive (consistent growth direction).")
-
-    return eff_df
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  STEP 8 – MONOTONIC TREND TESTS
-# ─────────────────────────────────────────────────────────────────────────────
-def _mannkendall(x):
-    """Mann-Kendall tau and p-value."""
-    n = len(x)
-    s = sum(np.sign(x[j] - x[i]) for i in range(n-1) for j in range(i+1, n))
-    var_s = n * (n - 1) * (2 * n + 5) / 18
-    if s > 0:
-        z = (s - 1) / np.sqrt(var_s)
-    elif s < 0:
-        z = (s + 1) / np.sqrt(var_s)
-    else:
-        z = 0
-    p = 2 * (1 - stats.norm.cdf(abs(z)))
-    tau = s / (n * (n - 1) / 2)
-    return tau, p, z
-
-
-def _cox_stuart(x):
-    """Cox-Stuart sign test for trend."""
-    n   = len(x)
-    c   = n // 2
-    pos = sum(1 for i in range(c) if x[i + c] > x[i])
-    neg = sum(1 for i in range(c) if x[i + c] < x[i])
-    total = pos + neg
-    if total == 0:
-        return np.nan
-    p = 2 * min(stats.binom.cdf(pos, total, 0.5),
-                stats.binom.cdf(neg, total, 0.5))
-    return p
-
-
-def step8_trend(groups: dict, ov: pd.DataFrame) -> dict:
-    print("\n" + "=" * 70)
-    print("STEP 8 — MONOTONIC TREND TESTS")
-    print("=" * 70)
-
-    dates  = list(groups.keys())
-    means  = ov.set_index('date').loc[dates, 'mean_mm'].values
-    ns     = ov.set_index('date').loc[dates, 'n'].values
-    x_idx  = np.arange(len(dates))
-
-    # Spearman
-    rho, p_sp = spearmanr(x_idx, means)
-    # Kendall
-    tau_k, p_kd = kendalltau(x_idx, means)
-    # Mann-Kendall
-    tau_mk, p_mk, z_mk = _mannkendall(means)
-    # Cox-Stuart
-    p_cs = _cox_stuart(means)
-    # OLS linear
-    slope, intercept, r_lin, p_lin, se_lin = stats.linregress(x_idx, means)
-
-    print(f"  Spearman ρ={rho:.3f}  p={p_sp:.4f}")
-    print(f"  Kendall τ={tau_k:.3f}  p={p_kd:.4f}")
-    print(f"  Mann-Kendall τ={tau_mk:.3f}  z={z_mk:.3f}  p={p_mk:.4f}")
-    print(f"  Cox-Stuart p={p_cs:.4f}")
-    print(f"  OLS: slope={slope:.4f} mm/day  R²={r_lin**2:.4f}  p={p_lin:.4f}")
-
-    # Figure: mean + trend lines
-    fig, ax = plt.subplots(figsize=(12, 5))
-    ax.plot(x_idx, means, 'o-', color='steelblue', lw=2, markersize=9,
-            label='Daily mean', zorder=5)
-
-    for i, (xi, yi, n) in enumerate(zip(x_idx, means, ns)):
-        ax.annotate(f"n={int(n)}", (xi, yi), textcoords='offset points',
-                    xytext=(0, 10), ha='center', fontsize=8, color='gray')
-
-    # OLS
-    ax.plot(x_idx, slope * x_idx + intercept, 'r--', lw=2,
-            label=f'OLS: {slope:+.3f} mm/step  R²={r_lin**2:.3f}  p={p_lin:.4f}')
-
-    # LOWESS
-    lw_out = lowess(means, x_idx, frac=0.5)
-    ax.plot(lw_out[:, 0], lw_out[:, 1], 'g-', lw=2.5, label='LOWESS (frac=0.5)')
-
-    ax.set_xticks(x_idx); ax.set_xticklabels(dates, rotation=45, ha='right')
-    ax.set_xlabel('Date'); ax.set_ylabel('Mean Body Length (mm)')
-    ax.set_title('Daily Mean with Trend Lines')
-    ax.legend(); ax.grid(True, alpha=0.3)
-    plt.tight_layout()
-    savefig("08_trend_tests.png")
-
-    result = {
-        'spearman_rho': rho, 'spearman_p': p_sp,
-        'kendall_tau': tau_k, 'kendall_p': p_kd,
-        'mannkendall_tau': tau_mk, 'mannkendall_p': p_mk,
-        'cox_stuart_p': p_cs,
-        'ols_slope': slope, 'ols_r2': r_lin**2, 'ols_p': p_lin,
-    }
-    trend_row = pd.DataFrame([result])
-    savecsv(trend_row, 'trend_tests.csv')
-
-    R.h1("Step 8 – Monotonic Trend Tests")
-    R.bullet(f"Spearman ρ = {rho:.3f}  (p = {p_sp:.4f})")
-    R.bullet(f"Kendall τ  = {tau_k:.3f}  (p = {p_kd:.4f})")
-    R.bullet(f"Mann-Kendall τ = {tau_mk:.3f}  (z = {z_mk:.2f}, p = {p_mk:.4f})")
-    R.bullet(f"Cox-Stuart sign test p = {p_cs:.4f}")
-    R.bullet(f"OLS slope = {slope:.4f} mm/day-step  R² = {r_lin**2:.4f}  p = {p_lin:.4f}")
-
-    trend_sig = sum([p_sp < ALPHA, p_kd < ALPHA, p_mk < ALPHA,
-                     (p_cs < ALPHA if p_cs is not None and not np.isnan(p_cs) else False)])
-    if trend_sig >= 3:
-        R.ok(f"{trend_sig}/4 trend tests are significant — STRONG evidence for a monotonic "
-             f"upward trend in daily mean body length.")
-    elif trend_sig >= 2:
-        R.p(f"{trend_sig}/4 trend tests significant — MODERATE evidence for monotonic growth.")
-    else:
-        R.warn(f"Only {trend_sig}/4 trend tests significant — trend evidence is WEAK.")
-
-    return result
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  STEP 9 – ANOVA / KRUSKAL-WALLIS
-# ─────────────────────────────────────────────────────────────────────────────
-def step9_anova(groups: dict):
-    print("\n" + "=" * 70)
-    print("STEP 9 — ANOVA / KRUSKAL-WALLIS")
-    print("=" * 70)
-
-    arrays = list(groups.values())
-    dates  = list(groups.keys())
-
-    F, p_f    = f_oneway(*arrays)
-    H, p_kw   = kruskal(*arrays)
-
-    print(f"  One-way ANOVA:     F={F:.3f}  p={p_f:.6f}")
-    print(f"  Kruskal-Wallis:    H={H:.3f}  p={p_kw:.6f}")
-
-    R.h1("Step 9 – ANOVA and Kruskal-Wallis")
-    R.bullet(f"One-way ANOVA:    F = {F:.3f}  p = {p_f:.2e}")
-    R.bullet(f"Kruskal-Wallis:   H = {H:.3f}  p = {p_kw:.2e}")
-
-    if p_f < ALPHA:
-        R.ok("Parametric ANOVA: dates differ significantly.")
-    else:
-        R.warn("Parametric ANOVA: dates do NOT differ significantly.")
-
-    if p_kw < ALPHA:
-        R.ok("Kruskal-Wallis (non-parametric): dates differ significantly.")
-    else:
-        R.warn("Kruskal-Wallis: dates do NOT differ significantly.")
-
-    return {'anova_F': F, 'anova_p': p_f, 'kruskal_H': H, 'kruskal_p': p_kw}
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  STEP 10 – POST-HOC (Tukey HSD + Dunn)
-# ─────────────────────────────────────────────────────────────────────────────
-def _dunn_pairwise(groups: dict, alpha: float = ALPHA) -> pd.DataFrame:
-    """Simple Dunn's test with Bonferroni correction."""
-    dates  = list(groups.keys())
-    all_vals = np.concatenate(list(groups.values()))
-    n_total  = len(all_vals)
-    group_labels = np.concatenate([[d] * len(groups[d]) for d in dates])
-    ranks    = stats.rankdata(all_vals)
-    rank_sums = {d: ranks[group_labels == d].sum() for d in dates}
-    ns        = {d: len(groups[d]) for d in dates}
-    n_pairs   = len(dates) * (len(dates) - 1) // 2
-
-    rows = []
-    for d1, d2 in combinations(dates, 2):
-        z_val = (rank_sums[d1] / ns[d1] - rank_sums[d2] / ns[d2])
-        se    = np.sqrt((n_total * (n_total + 1) / 12) * (1/ns[d1] + 1/ns[d2]))
-        z     = z_val / se if se > 0 else 0
-        p_raw = 2 * (1 - stats.norm.cdf(abs(z)))
-        p_adj = min(p_raw * n_pairs, 1.0)  # Bonferroni
-        rows.append({'date1': d1, 'date2': d2, 'z': z,
-                     'p_raw': p_raw, 'p_bonferroni': p_adj,
-                     'significant': p_adj < alpha})
-    return pd.DataFrame(rows)
-
-
-def step10_posthoc(groups: dict, ov: pd.DataFrame):
-    print("\n" + "=" * 70)
-    print("STEP 10 — POST-HOC COMPARISONS")
-    print("=" * 70)
-
-    dates  = list(groups.keys())
-    # Tukey HSD
-    all_vals   = np.concatenate([groups[d] for d in dates])
-    group_ids  = np.concatenate([[d] * len(groups[d]) for d in dates])
-    tukey      = pairwise_tukeyhsd(all_vals, group_ids, alpha=ALPHA)
-
-    tukey_df = pd.DataFrame(
-        data=tukey._results_table.data[1:],
-        columns=tukey._results_table.data[0]
-    )
-    tukey_df.columns = [str(c) for c in tukey_df.columns]
-    savecsv(tukey_df, 'tukey_hsd.csv')
-
-    # Dunn
-    dunn_df = _dunn_pairwise(groups)
-    savecsv(dunn_df, 'dunn_posthoc.csv')
-
-    # Heatmap of significant pairs
-    n = len(dates)
-    sig_matrix = np.zeros((n, n))
-    date_idx = {d: i for i, d in enumerate(dates)}
-    for _, row in dunn_df.iterrows():
-        i, j = date_idx[row['date1']], date_idx[row['date2']]
-        sig_matrix[i, j] = sig_matrix[j, i] = 1.0 if row['significant'] else 0.0
-
-    fig, ax = plt.subplots(figsize=(9, 7))
-    sns.heatmap(sig_matrix, xticklabels=dates, yticklabels=dates,
-                cmap='RdYlGn', vmin=0, vmax=1, linewidths=0.5,
-                annot=True, fmt='.0f', ax=ax,
-                cbar_kws={'label': '1=significant (Dunn Bonferroni)'})
-    ax.set_title("Significant Pairwise Differences — Dunn's Test (Bonferroni)")
-    plt.tight_layout()
-    savefig("10_posthoc_heatmap.png")
-
-    n_sig = dunn_df['significant'].sum()
-    n_total_pairs = len(dunn_df)
-    R.h1("Step 10 – Post-Hoc Pairwise Comparisons")
-    R.bullet(f"Dunn's test (Bonferroni): {n_sig}/{n_total_pairs} pairs significant")
-    R.bullet("See tukey_hsd.csv and dunn_posthoc.csv for full pairwise table.")
-
-    return tukey_df, dunn_df
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  STEP 11 – SMOOTHING COMPARISON
-# ─────────────────────────────────────────────────────────────────────────────
-def step11_smoothing(groups: dict, ov: pd.DataFrame):
-    print("\n" + "=" * 70)
-    print("STEP 11 — SMOOTHING COMPARISON")
-    print("=" * 70)
-
-    dates   = list(groups.keys())
-    x_idx   = np.arange(len(dates))
-    means   = ov.set_index('date').loc[dates, 'mean_mm'].values
-    medians = ov.set_index('date').loc[dates, 'median_mm'].values
-
-    fig, ax = plt.subplots(figsize=(13, 6))
-    ax.scatter(x_idx, means, s=80, zorder=5, color='steelblue', label='Daily mean')
-    ax.scatter(x_idx, medians, s=60, zorder=5, color='tomato', marker='s', label='Daily median', alpha=0.8)
-
-    # LOWESS variants
-    for frac, color, lbl in [(0.3, 'green', 'LOWESS 0.3'), (0.6, 'olive', 'LOWESS 0.6')]:
-        lw = lowess(means, x_idx, frac=frac)
-        ax.plot(lw[:, 0], lw[:, 1], lw=2.2, color=color, label=lbl)
-
-    # Cubic spline (if enough points)
-    if len(x_idx) >= 5:
-        try:
-            x_fine = np.linspace(x_idx[0], x_idx[-1], 200)
-            spl = make_interp_spline(x_idx, means, k=3)
-            ax.plot(x_fine, spl(x_fine), lw=2, color='purple', ls='--', label='Cubic spline')
-        except Exception:
+            x_min, x_max = arr.min() - 0.5, arr.max() + 0.5
+            x_eval = np.linspace(x_min, x_max, 500)
+            kde_vals = kde(x_eval)
+
+            ax.plot(x_eval, kde_vals, 'k-', lw=2.5, label='KDE', alpha=0.8)
+
+            # Detect and mark peaks
+            peaks, _ = find_peaks(kde_vals, prominence=0.05 * kde_vals.max())
+            if len(peaks) > 3:
+                prominences = find_peaks(kde_vals, prominence=0.05 * kde_vals.max())[1]['prominences']
+                top_3_idx = np.argsort(prominences)[-3:]
+                peaks = peaks[top_3_idx]
+                peaks = np.sort(peaks)
+
+            peak_positions = x_eval[peaks]
+
+            # Mark peaks with vertical lines
+            colors_peaks = ['red', 'blue', 'green']
+            for j, peak_x in enumerate(peak_positions):
+                color = colors_peaks[j % len(colors_peaks)]
+                ax.axvline(peak_x, color=color, ls='--', lw=2, alpha=0.7,
+                          label=f'Peak {j+1}' if j < 3 else None)
+
+            # Shade cohort regions
+            date_cohorts = kde_cohort_stats[kde_cohort_stats['date'] == date]
+            colors_cohorts = ['lightblue', 'lightgreen', 'lightyellow']
+
+            for idx, cohort_row in date_cohorts.iterrows():
+                cohort_id = cohort_row['cohort_id']
+                min_len = cohort_row['min_length']
+                max_len = cohort_row['max_length']
+                color = colors_cohorts[cohort_id % len(colors_cohorts)]
+
+                ax.axvspan(min_len, max_len, alpha=0.15, color=color)
+
+        except Exception as e:
             pass
 
-    # Rolling mean (window=3)
-    if len(means) >= 3:
-        rm = pd.Series(means).rolling(3, center=True).mean().values
-        ax.plot(x_idx, rm, lw=2, color='darkorange', ls=':', label='Rolling mean (w=3)')
+        # Get cohort count for this date
+        date_count = cohort_count_df[cohort_count_df['date'] == date]
+        n_cohorts = date_count['n_cohorts'].iloc[0] if len(date_count) > 0 else 1
 
-    ax.set_xticks(x_idx); ax.set_xticklabels(dates, rotation=45, ha='right')
-    ax.set_xlabel('Date'); ax.set_ylabel('Body Length (mm)')
-    ax.set_title('Smoothing Comparison — Do curves agree on growth pattern?')
-    ax.legend(fontsize=9); ax.grid(True, alpha=0.3)
+        title = f"{date} (n={n})\n{n_cohorts} cohort(s)"
+        ax.set_title(title, fontsize=9, fontweight='bold')
+        ax.set_xlabel('Body Length (mm)', fontsize=8)
+        ax.set_ylabel('Density', fontsize=8)
+        ax.legend(fontsize=6, loc='upper right')
+        ax.grid(alpha=0.3)
+
+    for j in range(i + 1, len(axes)):
+        axes[j].set_visible(False)
+
+    plt.suptitle('KDE-Based Cohort Decomposition (Non-Gaussian)',
+                fontsize=14, fontweight='bold')
     plt.tight_layout()
-    savefig("11_smoothing_comparison.png")
+    savefig('02d_kde_cohort_decomposition.png')
 
-    R.h1("Step 11 – Smoothing Comparison")
-    R.p("Multiple smoothers applied to daily means (LOWESS, cubic spline, rolling mean).")
-    R.p("Consistent shape across all smoothers would support reliability of the trend.")
+    # ── Report Summary ───────────────────────────────────────────────────────
+    R.h1("Step 2D – KDE-Based Cohort Decomposition")
+    R.p("Non-parametric cohort identification using kernel density estimation and peak detection.")
+    R.p("This method does NOT assume Gaussian distributions.")
+    R.p("")
 
-    # Check if spline is monotonically increasing
-    try:
-        spl = make_interp_spline(x_idx, means, k=3)
-        x_fine = np.linspace(x_idx[0], x_idx[-1], 500)
-        spl_vals = spl(x_fine)
-        diffs = np.diff(spl_vals)
-        monotone = bool(np.all(diffs >= -0.001))
-        if monotone:
-            R.ok("Cubic spline is monotonically non-decreasing — consistent with growth hypothesis.")
-        else:
-            R.warn("Cubic spline shows local DIPS — growth is NOT monotone in the smooth fit.")
-    except Exception:
-        pass
+    n_analyzed = len(cohort_count_df)
+    n_single = len(cohort_count_df[cohort_count_df['n_cohorts'] == 1])
+    n_multi = len(cohort_count_df[cohort_count_df['n_cohorts'] > 1])
 
+    R.bullet(f"Dates analyzed: {n_analyzed}/{len(dates)}")
+    R.bullet(f"Dates with 1 cohort: {n_single}")
+    R.bullet(f"Dates with multiple cohorts: {n_multi}")
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  STEP 12 – RESIDUAL STRUCTURE
-# ─────────────────────────────────────────────────────────────────────────────
-def step12_residuals(groups: dict, ov: pd.DataFrame):
-    print("\n" + "=" * 70)
-    print("STEP 12 — RESIDUAL STRUCTURE")
-    print("=" * 70)
+    if n_multi > 0:
+        multi_dates = cohort_count_df[cohort_count_df['n_cohorts'] > 1]['date'].tolist()
+        R.bullet(f"Dates with multiple cohorts: {', '.join(multi_dates)}")
 
-    dates  = list(groups.keys())
-    x_idx  = np.arange(len(dates))
-    means  = ov.set_index('date').loc[dates, 'mean_mm'].values
+        R.p("")
+        R.warn(f"MULTIPLE COHORTS DETECTED (KDE method): {n_multi} dates show multimodal structure.")
 
-    # Detrend with OLS
-    slope, intercept, _, _, _ = stats.linregress(x_idx, means)
-    trend    = slope * x_idx + intercept
-    residuals = means - trend
+        # Average peak separation
+        if len(peak_separations) > 0:
+            avg_separation = np.mean(peak_separations)
+            R.bullet(f"Average cohort separation (peak distance): {avg_separation:.3f} mm")
 
-    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+            if avg_separation > 0.5:
+                R.p("Large separation suggests distinct cohorts with minimal overlap.")
+            else:
+                R.p("Small separation suggests overlapping cohorts or continuous distribution.")
 
-    # Residuals vs fitted
-    ax = axes[0]
-    ax.scatter(trend, residuals, color='steelblue', s=70, zorder=3)
-    ax.axhline(0, color='red', lw=1.5, ls='--')
-    for xi, ri, d in zip(trend, residuals, dates):
-        ax.annotate(d, (xi, ri), textcoords='offset points', xytext=(4,3), fontsize=8)
-    ax.set_xlabel('Fitted (trend)'); ax.set_ylabel('Residual (mm)')
-    ax.set_title('Residuals vs Fitted')
-    ax.grid(True, alpha=0.3)
+        R.p("")
+        R.p("COMPARISON WITH GMM (Step 2C):")
+        R.p("• KDE method: Non-parametric, detects any multimodal structure")
+        R.p("• GMM method: Parametric, assumes Gaussian components")
+        R.p("• Convergent evidence from both methods strengthens cohort hypothesis")
 
-    # Residual ACF (manual)
-    ax = axes[1]
-    n_res = len(residuals)
-    acf_vals = [1.0]
-    for lag in range(1, min(n_res, 8)):
-        acf_vals.append(np.corrcoef(residuals[:-lag], residuals[lag:])[0, 1])
-    ax.bar(range(len(acf_vals)), acf_vals, color='purple', alpha=0.7)
-    ax.axhline(0, color='black', lw=1)
-    ci_bound = 1.96 / np.sqrt(n_res)
-    ax.axhline(ci_bound, color='red', ls='--', lw=1, label='±95% CI')
-    ax.axhline(-ci_bound, color='red', ls='--', lw=1)
-    ax.set_xlabel('Lag'); ax.set_ylabel('ACF')
-    ax.set_title('Residual Autocorrelation (ACF)')
-    ax.legend(fontsize=8); ax.grid(True, alpha=0.3)
-
-    # Q-Q of residuals
-    ax = axes[2]
-    (osm, osr), (sl, ic, rv) = stats.probplot(residuals, dist='norm')
-    ax.plot(osm, osr, 'o', color='green')
-    ax.plot(osm, sl * np.array(osm) + ic, 'r-')
-    ax.set_title(f'Q-Q of Residuals  R²={rv**2:.3f}')
-    ax.set_xlabel('Theoretical'); ax.set_ylabel('Sample')
-    ax.grid(True, alpha=0.3)
-
-    plt.tight_layout()
-    savefig("12_residual_structure.png")
-
-    R.h1("Step 12 – Residual Structure")
-    acf_lag1 = acf_vals[1] if len(acf_vals) > 1 else np.nan
-    R.bullet(f"Lag-1 residual autocorrelation = {acf_lag1:.3f}")
-    if abs(acf_lag1) > ci_bound:
-        R.warn(f"Significant autocorrelation at lag 1 — daily means are NOT independent. "
-               f"Simple trend p-values may be anticonservative.")
     else:
-        R.ok("Residuals show no significant autocorrelation — independence assumption holds.")
+        R.ok("No multimodal structure detected via KDE peak detection.")
+        R.p("Distributions are unimodal or peaks are too weak to detect.")
+
+    return kde_cohort_stats
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  STEP 13 – COEFFICIENT OF VARIATION + SAMPLING ADEQUACY
-# ─────────────────────────────────────────────────────────────────────────────
-def step13_cv_sampling(groups: dict, ov: pd.DataFrame):
-    print("\n" + "=" * 70)
-    print("STEP 13 — CV + SAMPLING ADEQUACY")
-    print("=" * 70)
-
-    dates = list(groups.keys())
-    cv    = ov.set_index('date').loc[dates, 'cv_pct'].values
-    ns    = ov.set_index('date').loc[dates, 'n'].values
-    stds  = ov.set_index('date').loc[dates, 'std_mm'].values
-    means = ov.set_index('date').loc[dates, 'mean_mm'].values
-
-    # Margin of error (95% CI half-width assuming normality)
-    moe = 1.96 * stds / np.sqrt(ns)
-    moe_pct = 100 * moe / means
-
-    rows = []
-    for d, c, n, m, moe_v, moe_p in zip(dates, cv, ns, means, moe, moe_pct):
-        # Min n for ±10% margin at 95% confidence (rough)
-        n_required = int(np.ceil((1.96 * (c/100)) ** 2 / (0.1) ** 2))
-        rows.append({
-            'date': d, 'n': int(n),
-            'cv_pct': c,
-            'margin_of_error_mm': moe_v,
-            'margin_of_error_pct': moe_p,
-            'n_required_10pct_margin': n_required,
-            'adequate_10pct': int(n) >= n_required,
-        })
-
-    samp_df = pd.DataFrame(rows)
-    savecsv(samp_df, 'cv_and_sampling_adequacy.csv')
-
-    fig, axes = plt.subplots(1, 2, figsize=(13, 5))
-
-    ax = axes[0]
-    bars = ax.bar(dates, cv, color='mediumpurple', edgecolor='white', alpha=0.85)
-    ax.axhline(30, color='orange', ls='--', lw=1.5, label='CV=30% threshold')
-    ax.axhline(50, color='red', ls='--', lw=1.5, label='CV=50% threshold')
-    for bar, val in zip(bars, cv):
-        ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.5,
-                f"{val:.1f}%", ha='center', fontsize=8)
-    ax.set_title('Coefficient of Variation per Date')
-    ax.set_ylabel('CV (%)'); ax.tick_params(axis='x', rotation=45)
-    ax.legend(fontsize=8); ax.grid(True, alpha=0.3, axis='y')
-
-    ax = axes[1]
-    ax.bar(dates, ns, color='teal', edgecolor='white', alpha=0.85, label='Actual n')
-    ax.step(range(len(dates)), [r['n_required_10pct_margin'] for r in rows],
-            where='mid', color='red', lw=2, label='n needed for ±10% MoE')
-    ax.set_title('Sample Size vs Required for ±10% Margin of Error')
-    ax.set_ylabel('n'); ax.tick_params(axis='x', rotation=45)
-    ax.legend(fontsize=8); ax.grid(True, alpha=0.3, axis='y')
-
-    plt.tight_layout()
-    savefig("13_cv_sampling_adequacy.png")
-
-    R.h1("Step 13 – Coefficient of Variation and Sampling Adequacy")
-    for _, row in samp_df.iterrows():
-        msg = (f"{row['date']}: CV={row['cv_pct']:.1f}%  "
-               f"MoE={row['margin_of_error_mm']:.3f}mm ({row['margin_of_error_pct']:.1f}%)  "
-               f"n={int(row['n'])} (need {int(row['n_required_10pct_margin'])} for ±10%)")
-        if row['cv_pct'] > 50:
-            R.warn(msg + " — VERY HIGH variability")
-        elif row['cv_pct'] > 30:
-            R.p(msg + " — moderate variability")
-        else:
-            R.ok(msg)
-
-    return samp_df
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  STEP 14 – SUMMARY DASHBOARD
-# ─────────────────────────────────────────────────────────────────────────────
-def step14_dashboard(groups: dict, ov: pd.DataFrame, boot_df: pd.DataFrame):
-    print("\n" + "=" * 70)
-    print("STEP 14 — SUMMARY DASHBOARD")
-    print("=" * 70)
 
-    dates = list(groups.keys())
-    x     = np.arange(len(dates))
-    means = ov.set_index('date').loc[dates, 'mean_mm'].values
-    stds  = ov.set_index('date').loc[dates, 'std_mm'].values
-    ns    = ov.set_index('date').loc[dates, 'n'].values
-
-    # Merge boot CI
-    bd = boot_df.set_index('date')
-
-    fig = plt.figure(figsize=(16, 12))
-    gs  = gridspec.GridSpec(3, 2, figure=fig, hspace=0.45, wspace=0.35)
-
-    # ── Top: mean ± 1sd + BCa CI ─────────────────────────────────────────
-    ax0 = fig.add_subplot(gs[0, :])
-    dash_lo_err = np.clip(means - np.array([bd.loc[d, 'ci_mean_lo'] for d in dates]), 0, None)
-    dash_hi_err = np.clip(np.array([bd.loc[d, 'ci_mean_hi'] for d in dates]) - means, 0, None)
-    ax0.fill_between(x,
-                     [bd.loc[d, 'ci_mean_lo'] for d in dates],
-                     [bd.loc[d, 'ci_mean_hi'] for d in dates],
-                     alpha=0.25, color='steelblue', label='95% BCa CI (mean)')
-    ax0.errorbar(x, means, yerr=stds,
-                 fmt='o-', color='steelblue', lw=2.5, markersize=10,
-                 capsize=5, label='Mean ± 1 SD')
-    ax0.plot(x, [bd.loc[d, 'median'] for d in dates], 's--',
-             color='tomato', lw=1.8, markersize=8, label='Median')
-    for xi, yi, ni in zip(x, means, ns):
-        ax0.annotate(f"n={int(ni)}", (xi, yi), textcoords='offset points',
-                     xytext=(0, 14), ha='center', fontsize=8, color='gray')
-    lw_out = lowess(means, x, frac=0.5)
-    ax0.plot(lw_out[:, 0], lw_out[:, 1], 'g-', lw=2, alpha=0.7, label='LOWESS')
-    ax0.set_xticks(x); ax0.set_xticklabels(dates, rotation=45, ha='right')
-    ax0.set_ylabel('Body Length (mm)'); ax0.set_title('Daily Mean ± SD with Bootstrap CI and LOWESS')
-    ax0.legend(fontsize=9); ax0.grid(True, alpha=0.3)
-
-    # ── Violin ───────────────────────────────────────────────────────────
-    ax1 = fig.add_subplot(gs[1, :])
-    vp = ax1.violinplot([groups[d] for d in dates], positions=x,
-                         showmedians=True, showextrema=True)
-    for pc in vp['bodies']:
-        pc.set_alpha(0.65)
-    ax1.set_xticks(x); ax1.set_xticklabels(dates, rotation=45, ha='right')
-    ax1.set_ylabel('Length (mm)'); ax1.set_title('Violin Plots per Date')
-    ax1.grid(True, alpha=0.3)
-
-    # ── CV ──────────────────────────────────────────────────────────────
-    ax2 = fig.add_subplot(gs[2, 0])
-    cv_vals = 100 * stds / means
-    ax2.bar(x, cv_vals, color='mediumpurple', edgecolor='white', alpha=0.85)
-    ax2.axhline(30, color='orange', ls='--', lw=1.5)
-    ax2.axhline(50, color='red', ls='--', lw=1.5)
-    ax2.set_xticks(x); ax2.set_xticklabels(dates, rotation=45, ha='right')
-    ax2.set_ylabel('CV (%)'); ax2.set_title('Within-Day Variability (CV)')
-    ax2.grid(True, alpha=0.3, axis='y')
-
-    # ── Sample size ─────────────────────────────────────────────────────
-    ax3 = fig.add_subplot(gs[2, 1])
-    ax3.bar(x, ns, color='teal', edgecolor='white', alpha=0.85)
-    ax3.set_xticks(x); ax3.set_xticklabels(dates, rotation=45, ha='right')
-    ax3.set_ylabel('n'); ax3.set_title('Sample Size per Date')
-    ax3.grid(True, alpha=0.3, axis='y')
-
-    plt.suptitle('Growth Validation Dashboard', fontsize=15, fontweight='bold', y=1.01)
-    savefig("14_summary_dashboard.png")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  FINAL STRUCTURED REPORT
-# ─────────────────────────────────────────────────────────────────────────────
-def write_final_report(trend_result: dict, hetero: dict, anova_result: dict,
-                       eff_df: pd.DataFrame, samp_df: pd.DataFrame, boot_df: pd.DataFrame):
-
-    R.h1("FINAL CONCLUSIONS — GROWTH VALIDATION ANALYSIS")
-    R.p(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    R.p()
-
-    R.h2("A. Does daily mean represent the underlying distribution?")
-    avg_cv = samp_df['cv_pct'].mean()
-    max_dev_moe = samp_df['margin_of_error_pct'].max()
-    if avg_cv > 50:
-        R.warn(f"CONCERN: Average CV across dates is {avg_cv:.1f}%. "
-               f"High within-day variability means the mean is a noisy estimator.")
-        R.warn("Median or trimmed mean may be more representative.")
-    elif avg_cv > 30:
-        R.p(f"MODERATE: Average CV = {avg_cv:.1f}%. Mean is usable but consider robust alternatives.")
-    else:
-        R.ok(f"CV = {avg_cv:.1f}% — mean is a stable daily estimator.")
-
-    R.h2("B. Are day-to-day fluctuations statistically meaningful?")
-    n_sig_adj = eff_df['significant_mw'].sum()
-    n_pairs   = len(eff_df)
-    if n_sig_adj == n_pairs:
-        R.ok(f"All {n_pairs} adjacent-day transitions are significant (Mann-Whitney p<0.05). "
-             "Fluctuations are NOT sampling noise.")
-    elif n_sig_adj > n_pairs / 2:
-        R.p(f"{n_sig_adj}/{n_pairs} adjacent transitions significant — "
-            "most fluctuations are real, but some may be noise.")
-    else:
-        R.warn(f"Only {n_sig_adj}/{n_pairs} adjacent transitions significant — "
-               "many apparent changes are likely sampling noise.")
-
-    R.h2("C. Is there a consistent biological growth pattern?")
-    p_mk = trend_result['mannkendall_p']
-    tau  = trend_result['mannkendall_tau']
-    r2   = trend_result['ols_r2']
-    n_sig_trend = sum([
-        trend_result['spearman_p'] < ALPHA,
-        trend_result['kendall_p'] < ALPHA,
-        p_mk < ALPHA,
-    ])
-    if n_sig_trend >= 2 and tau > 0:
-        R.ok(f"STRONG evidence: Mann-Kendall τ={tau:.3f} (p={p_mk:.4f}), "
-             f"Spearman ρ={trend_result['spearman_rho']:.3f}. "
-             f"OLS R²={r2:.3f}. Growth is consistent and upward.")
-    elif n_sig_trend >= 1:
-        R.p(f"PARTIAL evidence: {n_sig_trend}/3 trend tests significant. "
-            f"Trend visible but not fully consistent.")
-    else:
-        R.warn(f"WEAK evidence: only {n_sig_trend}/3 trend tests significant. "
-               f"Cannot confirm monotonic biological growth.")
-
-    R.h2("D. Does within-day variability undermine the mean?")
-    n_high_cv = (samp_df['cv_pct'] > 50).sum()
-    if n_high_cv > 0:
-        R.warn(f"{n_high_cv} date(s) have CV > 50% — within-day variability is very high. "
-               f"Mean may misrepresent the 'typical' larva for those days.")
-    else:
-        R.ok("No date has CV > 50% — within-day variability is manageable.")
-
-    R.h2("E. Is mean the appropriate estimator?")
-    R.bullet("Mean vs median max deviation: see Step 4.")
-    R.bullet("If distributions are right-skewed or have outliers, median is safer.")
-    R.bullet("Trimmed mean (10%) provides a middle-ground robust estimate.")
-
-    R.h2("F. Does smoothing change interpretation?")
-    R.p("LOWESS, cubic spline, and rolling mean all applied in Step 11.")
-    R.p("If smoothers agree → trend shape is robust to method choice.")
-
-    R.h2("G. Statistical evidence for monotonic growth?")
-    if n_sig_trend >= 2 and tau > 0:
-        R.ok(f"YES — multiple non-parametric tests (Spearman, Kendall, Mann-Kendall) "
-             f"confirm a significant positive trend in mean body length over time.")
-        R.ok(f"OLS slope = {trend_result['ols_slope']:.4f} mm per date-step.")
-    else:
-        R.warn("Evidence for monotonic growth is INSUFFICIENT based on current data.")
-
-    R.h2("H. Heteroscedasticity")
-    lev_p = hetero['levene_p']
-    if lev_p < ALPHA:
-        R.warn(f"Levene p={lev_p:.4f} — UNEQUAL variances across dates. "
-               "Welch tests preferred; pooled parametric models may be invalid.")
-    else:
-        R.ok(f"Levene p={lev_p:.4f} — variances are sufficiently equal.")
-
-    R.h2("I. Overall Assessment")
-    R.p("The daily mean body length appears to represent a REAL, STATISTICALLY")
-    R.p("SUPPORTED upward trend in larva body length over the observation period.")
-    R.p()
-    R.p("CAVEATS:")
-    R.bullet("High within-day variability (CV) means individual daily means are noisy.")
-    R.bullet("Some adjacent-day differences are not individually significant.")
-    R.bullet("Heteroscedasticity may affect parametric test validity.")
-    R.bullet("Autocorrelation in residuals (if present) inflates apparent trend significance.")
-    R.bullet("Bootstrap CIs provide the most reliable uncertainty bounds for the mean.")
-    R.p()
-    R.p("RECOMMENDATION:")
-    R.bullet("Use MEDIAN as primary daily summary (more robust).")
-    R.bullet("Report 95% BCa bootstrap CI alongside each estimate.")
-    R.bullet("LOWESS curve is the most honest growth trajectory visualisation.")
-    R.bullet("Treat individual-day means with caution for dates with n < 50 or CV > 40%.")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  MAIN
-# ─────────────────────────────────────────────────────────────────────────────
-def main():
-    print("\n" + "=" * 70)
-    print("GROWTH VALIDATION ANALYSIS")
-    print("Critical statistical evaluation of daily mean body length")
-    print("=" * 70)
-    print(f"Data   : {DATA_FILE}")
-    print(f"Output : {OUT_ROOT}")
-
-    if not DATA_FILE.exists():
-        print(f"❌ Data file not found: {DATA_FILE}")
-        sys.exit(1)
-
-    # Load
-    df, groups = load_data()
-
-    if len(groups) < 3:
-        print("❌ Too few date groups for analysis.")
-        sys.exit(1)
-
-    # Run all steps
-    ov       = step1_overview(groups)
-    norm_df  = step2_distributions(groups, ov)
-    out_df   = step3_outliers(groups)
-    step4_estimators(groups, ov)
-    boot_df  = step5_bootstrap(groups)
-    hetero   = step6_heteroscedasticity(groups)
-    eff_df   = step7_effect_sizes(groups)
-    trend    = step8_trend(groups, ov)
-    anova_r  = step9_anova(groups)
-    _        = step10_posthoc(groups, ov)
-    step11_smoothing(groups, ov)
-    step12_residuals(groups, ov)
-    samp_df  = step13_cv_sampling(groups, ov)
-    step14_dashboard(groups, ov, boot_df)
-
-    write_final_report(trend, hetero, anova_r, eff_df, samp_df, boot_df)
-
-    # Save report
-    R.save(REP_DIR / "growth_validation_report.txt")
-
-    print("\n" + "=" * 70)
-    print("GROWTH VALIDATION ANALYSIS — COMPLETE")
-    print(f"  figures/ → {len(list(FIG_DIR.glob('*.png')))} plots")
-    print(f"  tables/  → {len(list(TAB_DIR.glob('*.csv')))} CSVs")
-    print(f"  reports/ → growth_validation_report.txt")
-    print(f"  Output : {OUT_ROOT}")
-    print("=" * 70)
-
-
-if __name__ == '__main__':
-    try:
-        main()
-    except KeyboardInterrupt:
-        print("\n⚠  Interrupted.")
-    except Exception as exc:
-        print(f"\n❌ Fatal: {exc}")
-        traceback.print_exc()
-        sys.exit(1)
 
